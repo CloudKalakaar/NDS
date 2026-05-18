@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nds-tracker-v1';
+const CACHE_NAME = 'nds-tracker-v2';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -6,9 +6,9 @@ const ASSETS_TO_CACHE = [
   './app.js',
   './manifest.json',
   './logo.jpg',
-  './icon-180.png',
-  './icon-192.png',
-  './icon-512.png'
+  './icon-180-v2.png',
+  './icon-192-v2.png',
+  './icon-512-v2.png'
 ];
 
 // Install Event
