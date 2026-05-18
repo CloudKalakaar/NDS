@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>NDS - Student & Fee Tracker</title>
+  
+  <!-- PWA Meta Tags -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="NDS Tracker">
+  <meta name="theme-color" content="#E31C25">
+  
+  <!-- Favicons and PWA Icons -->
+  <link rel="apple-touch-icon" href="./icon-180.png">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" type="image/png" href="./icon-192.png">
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,300;0,400;0,600;0,700;0,800;1,700&family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+  <!-- Pull To Refresh Visual Indicator -->
+  <div id="pull-to-refresh" class="pull-refresh-container">
+    <div class="pull-refresh-content">
+      <svg class="spinner" viewBox="0 0 50 50">
+        <circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
+      </svg>
+      <span id="pull-refresh-text">Pull to refresh & sync...</span>
+    </div>
+  </div>
+
+  <!-- Onboarding / Master Name Setup Overlay -->
+  <div id="onboarding-modal" class="modal-overlay active" style="display: none;">
+    <div class="modal-card onboarding-card animated-fade-in">
+      <div class="onboarding-logo-container">
+        <img src="./logo.jpg" alt="NDS Logo" class="onboarding-logo">
+      </div>
+      <h1 class="brand-title italic-heading">NIKI DANCE STUDIO</h1>
+      <p class="onboarding-subtitle">Welcome Master! Let's set up your profile to manage the beat.</p>
+      
+      <form id="onboarding-form">
+        <div class="form-group">
+          <label for="onboarding-name">YOUR NAME / TITLE</label>
+          <input type="text" id="onboarding-name" placeholder="e.g. Niki" required autocomplete="off">
+        </div>
+        <button type="submit" class="btn btn-primary btn-glow btn-block">
+          Let's Dance 
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main App Shell -->
+  <div class="app-shell">
+    
+    <!-- Top Brand Header -->
+    <header class="app-header">
+      <div class="header-logo-container">
+        <img src="./logo.jpg" alt="NDS" class="header-logo">
+      </div>
+      <div class="header-greet">
+        <span class="greet-title">Hey, <span id="master-greet-name">Master</span> 👑</span>
+        <span class="greet-subtitle">NDS Studio Control</span>
+      </div>
+      <div class="header-actions">
+        <button id="quick-refresh-btn" class="icon-btn" title="Clear Cache & Hard Reload">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main View Scroll Container -->
+    <main class="app-main-content">
+
+      <!-- ==================== VIEW 1: DASHBOARD ==================== -->
+      <section id="view-dashboard" class="app-view active">
+        <!-- Quick Stats Grid -->
+        <div class="stats-grid">
+          <div class="stat-card glass-card">
+            <div class="stat-icon-wrapper red-glow">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#E31C25" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+            </div>
+            <div class="stat-info">
+              <span class="stat-label">Total Students</span>
+              <span id="stat-total-students" class="stat-value">0</span>
+            </div>
+          </div>
+          
+          <div class="stat-card glass-card">
+            <div class="stat-icon-wrapper green-glow">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+            </div>
+            <div class="stat-info">
+              <span class="stat-label">Collected (Month)</span>
+              <span id="stat-collected" class="stat-value">₹0</span>
+            </div>
+          </div>
+
+          <div class="stat-card glass-card">
+            <div class="stat-icon-wrapper gold-glow">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            </div>
+            <div class="stat-info">
+              <span class="stat-label">Pending (Month)</span>
+              <span id="stat-pending" class="stat-value">₹0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Collection Rate Progress Card -->
+        <div class="dashboard-progress-card glass-card">
+          <div class="progress-info-header">
+            <span class="progress-title">Collection Rate (Current Month)</span>
+            <span id="progress-percent" class="progress-value">0%</span>
+          </div>
+          <div class="progress-bar-container">
+            <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <!-- Fees Outstanding Block (Pending) -->
+        <div class="section-container">
+          <div class="section-header" style="flex-wrap: wrap; gap: 8px;">
+            <h2 id="pending-section-title" class="section-title italic-heading">FEES PENDING</h2>
+            <div class="pending-toggle-pills">
+              <button id="btn-toggle-pending-current" class="pill-btn active">This Month</button>
+              <button id="btn-toggle-pending-history" class="pill-btn">Previous Months</button>
+            </div>
+            <span id="pending-count-badge" class="badge badge-red">0</span>
+          </div>
+          
+          <div id="pending-students-list" class="pending-list-container">
+            <!-- Dynamic pending list elements here -->
+            <div class="empty-state">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              <p>Hooray! No pending fees for this month.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== VIEW 2: STUDENTS ==================== -->
+      <section id="view-students" class="app-view">
+        <!-- Sticky Sub-header Controls -->
+        <div class="sticky-controls">
+          <div class="search-bar-wrapper">
+            <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="text" id="student-search-input" placeholder="Search student name, phone, parent...">
+          </div>
+          
+          <div class="filter-row">
+            <div class="custom-select-wrapper">
+              <select id="student-batch-filter">
+                <option value="all">All Batches</option>
+                <!-- Dynamic batches option here -->
+              </select>
+            </div>
+            
+            <div class="custom-select-wrapper">
+              <select id="student-status-filter">
+                <option value="all">All Status</option>
+                <option value="active" selected>Active Only</option>
+                <option value="inactive">Inactive Only</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Student Cards List -->
+        <div id="students-grid" class="students-grid-container">
+          <!-- Dynamic cards populated by JS -->
+        </div>
+      </section>
+
+      <!-- ==================== VIEW 3: HISTORY ==================== -->
+      <section id="view-history" class="app-view">
+        <div class="sticky-controls">
+          <div class="search-bar-wrapper">
+            <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="text" id="history-search-input" placeholder="Search by student name...">
+          </div>
+          
+          <div class="filter-row">
+            <div class="custom-select-wrapper">
+              <input type="month" id="history-month-filter" class="month-input-filter">
+            </div>
+            <button id="clear-month-filter" class="btn btn-secondary btn-sm" style="display: none;">Clear Month</button>
+          </div>
+        </div>
+
+        <!-- Payment History List -->
+        <div id="payment-history-list" class="history-list-container">
+          <!-- Dynamic history rows populated by JS -->
+        </div>
+      </section>
+
+      <!-- ==================== VIEW 4: SETTINGS ==================== -->
+      <section id="view-settings" class="app-view">
+        <div class="settings-container">
+          
+          <!-- Profile Card -->
+          <div class="settings-section glass-card">
+            <h3 class="settings-section-title italic-heading">STUDIO MASTER PROFILE</h3>
+            <form id="settings-profile-form">
+              <div class="form-group">
+                <label for="settings-master-name">Master Name</label>
+                <input type="text" id="settings-master-name" placeholder="e.g. Niki" required>
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm">Update Profile Name</button>
+            </form>
+          </div>
+
+          <!-- Data Administration -->
+          <div class="settings-section glass-card">
+            <h3 class="settings-section-title italic-heading">DATA MANAGEMENT</h3>
+            <p class="settings-help-text">NDS Tracker operates entirely offline using your browser's local storage. Use the backup tools below to secure your studio's database.</p>
+            
+            <div class="settings-button-group">
+              <button id="btn-backup-data" class="btn btn-secondary btn-block">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Backup Database (.json)
+              </button>
+              
+              <button id="btn-trigger-restore" class="btn btn-secondary btn-block">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                Restore Database from Backup
+              </button>
+              <input type="file" id="restore-file-input" accept=".json" style="display: none;">
+            </div>
+          </div>
+
+          <!-- Developer Tools & App Status -->
+          <div class="settings-section glass-card">
+            <h3 class="settings-section-title italic-heading">SYSTEM INFORMATION</h3>
+            <div class="system-info-list">
+              <div class="info-item">
+                <span>App Version</span>
+                <span class="info-value">v1.0.0 (Beta)</span>
+              </div>
+              <div class="info-item">
+                <span>Active Database</span>
+                <span class="info-value text-green">Online (LocalStorage)</span>
+              </div>
+              <div class="info-item">
+                <span>Cached Resources</span>
+                <span id="cache-status-text" class="info-value">Checking...</span>
+              </div>
+            </div>
+            
+            <div class="settings-button-group" style="margin-top: 15px;">
+              <button id="btn-force-update" class="btn btn-danger btn-block btn-outline">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                Hard Purge Cache & Re-Sync Code
+              </button>
+              <button id="btn-reset-app" class="btn btn-danger btn-block">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                Factory Reset Studio Database
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Bottom Tab Bar Navigation -->
+    <nav class="app-tab-navigation">
+      <button class="nav-tab active" data-view="dashboard">
+        <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+        <span class="tab-label">Dashboard</span>
+      </button>
+      
+      <button class="nav-tab" data-view="students">
+        <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+        <span class="tab-label">Students</span>
+      </button>
+      
+      <button class="nav-tab" data-view="history">
+        <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+        <span class="tab-label">Payments</span>
+      </button>
+      
+      <button class="nav-tab" data-view="settings">
+        <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        <span class="tab-label">Settings</span>
+      </button>
+    </nav>
+
+    <!-- FAB for Add Student -->
+    <button id="fab-add-student" class="fab red-glow" title="Add New Student" style="display: none;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+    </button>
+
+    <!-- FAB for Log Payment -->
+    <button id="fab-log-payment" class="fab red-glow" title="Record Fee Payment" style="display: none;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+    </button>
+
+  </div> <!-- End App Shell -->
+
+  <!-- ==================== MODAL 1: ADD / EDIT STUDENT ==================== -->
+  <div id="student-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card animated-slide-up">
+      <div class="modal-header">
+        <h3 id="student-modal-title" class="modal-title italic-heading">ADMIT NEW STUDENT</h3>
+        <button class="modal-close icon-btn" onclick="closeModal('student-modal')">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      
+      <form id="student-form">
+        <input type="hidden" id="student-id-field">
+        
+        <div class="form-group">
+          <label for="student-name">Student Full Name *</label>
+          <input type="text" id="student-name" required placeholder="e.g. Alex D'Souza">
+        </div>
+        
+        <div class="form-group">
+          <label for="student-phone">Student WhatsApp / Number *</label>
+          <input type="tel" id="student-phone" required placeholder="e.g. 9876543210">
+        </div>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="student-parent">Parent Name</label>
+            <input type="text" id="student-parent" placeholder="e.g. Robert D'Souza">
+          </div>
+          
+          <div class="form-group">
+            <label for="student-batch">Dance Batch / Style</label>
+            <input type="text" id="student-batch" placeholder="e.g. Hip Hop (Mon/Wed)" list="batch-suggestions">
+            <datalist id="batch-suggestions">
+              <option value="Hip Hop Beginners">
+              <option value="Hip Hop Advanced">
+              <option value="Contemporary">
+              <option value="Zumba / Aerobics">
+              <option value="B-Boying & Breaking">
+              <option value="Kids Special Batch">
+            </datalist>
+          </div>
+        </div>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="student-fee">Monthly Fee (₹) *</label>
+            <input type="number" id="student-fee" required min="0" placeholder="1500" value="1500">
+          </div>
+          
+          <div class="form-group">
+            <label for="student-admission">Admission Date</label>
+            <input type="date" id="student-admission">
+          </div>
+        </div>
+
+        <div class="form-group" id="status-group" style="display: none;">
+          <label for="student-status">Enrollment Status</label>
+          <div class="custom-select-wrapper">
+            <select id="student-status">
+              <option value="active">Active (Currently Enrolled)</option>
+              <option value="inactive">Inactive (Paused Classes)</option>
+            </select>
+          </div>
+        </div>
+        
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('student-modal')">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-glow">Save Student</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL 2: LOG PAYMENT ==================== -->
+  <div id="payment-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card animated-slide-up">
+      <div class="modal-header">
+        <h3 id="payment-modal-title" class="modal-title italic-heading">RECORD FEE PAYMENT</h3>
+        <button class="modal-close icon-btn" onclick="closeModal('payment-modal')">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      
+      <form id="payment-form">
+        <input type="hidden" id="payment-id-field">
+        
+        <div class="form-group">
+          <label id="payment-student-label" for="payment-student-id">Select Student *</label>
+          <div id="payment-student-select-container" class="custom-select-wrapper">
+            <select id="payment-student-id" required>
+              <option value="">-- Choose Student --</option>
+              <!-- Populated dynamically by JS -->
+            </select>
+          </div>
+          <!-- Locked display when paying for a specific student -->
+          <div id="payment-student-locked-container" style="display: none;" class="payment-student-locked glass-card">
+            <span class="locked-avatar-symbol">👤</span>
+            <span id="payment-student-locked-name" class="locked-student-name">Student Name</span>
+          </div>
+        </div>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="payment-month">Fees for Month *</label>
+            <input type="month" id="payment-month" required>
+          </div>
+          
+          <div class="form-group">
+            <label for="payment-amount">Amount Paid (₹) *</label>
+            <input type="number" id="payment-amount" required min="0" placeholder="1500">
+          </div>
+        </div>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="payment-date">Payment Date *</label>
+            <input type="date" id="payment-date" required>
+          </div>
+          
+          <div class="form-group">
+            <label for="payment-method">Payment Mode</label>
+            <div class="custom-select-wrapper">
+              <select id="payment-method">
+                <option value="Cash">Cash</option>
+                <option value="GPay / PhonePe / UPI">GPay / PhonePe / UPI</option>
+                <option value="Bank Transfer">Bank Transfer</option>
+                <option value="Card">Card</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="payment-remarks">Remarks / Note</label>
+          <input type="text" id="payment-remarks" placeholder="e.g. Received full fees via cash">
+        </div>
+        
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('payment-modal')">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-glow">Record Receipt</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL 3: STUDENT DETAILS ==================== -->
+  <div id="student-detail-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card animated-slide-up student-detail-card">
+      <div class="modal-header">
+        <h3 class="modal-title italic-heading">STUDENT PROFILE</h3>
+        <button class="modal-close icon-btn" onclick="closeModal('student-detail-modal')">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      
+      <div class="student-profile-summary">
+        <div class="profile-avatar red-glow">
+          <span id="detail-avatar-letter">A</span>
+        </div>
+        <h2 id="detail-student-name" class="profile-name">Alex D'Souza</h2>
+        <span id="detail-student-batch" class="profile-batch">Hip Hop Beginners</span>
+        
+        <div class="profile-chips">
+          <span id="detail-status-badge" class="badge">Active</span>
+          <span id="detail-monthly-fee-badge" class="badge badge-outline">₹1,500/mo</span>
+        </div>
+      </div>
+      
+      <div class="detail-info-grid glass-card" style="margin-bottom: 20px;">
+        <div class="info-row">
+          <span class="info-lbl">WhatsApp / Phone:</span>
+          <span id="detail-student-phone" class="info-val">9876543210</span>
+        </div>
+        <div class="info-row">
+          <span class="info-lbl">Parent/Guardian Name:</span>
+          <span id="detail-student-parent" class="info-val">Robert D'Souza</span>
+        </div>
+        <div class="info-row">
+          <span class="info-lbl">Admission Date:</span>
+          <span id="detail-student-admission" class="info-val">12 May 2026</span>
+        </div>
+      </div>
+
+      <!-- Historical Dues Section -->
+      <div class="student-dues-section" id="detail-dues-wrapper" style="display: none; margin-bottom: 20px;">
+        <h4 class="detail-subtitle italic-heading" style="color: var(--warning-gold); border-bottom: 1px solid rgba(245, 158, 11, 0.2); padding-bottom: 8px;">PENDING DUES (PREVIOUS MONTHS)</h4>
+        <div id="detail-dues-list" class="detail-dues-list-container" style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+          <!-- Dynamic dues months list here -->
+        </div>
+      </div>
+
+      <div class="student-history-section">
+        <h4 class="detail-subtitle italic-heading">RECENT PAYMENT TRANSACTIONS</h4>
+        <div id="detail-payment-history" class="detail-payment-history-list">
+          <!-- Dynamic transaction history for specific student -->
+        </div>
+      </div>
+
+      <div class="modal-footer detail-actions-footer">
+        <button id="btn-delete-student" class="btn btn-danger btn-outline">Delete Student</button>
+        <button id="btn-edit-student" class="btn btn-secondary">Edit Details</button>
+        <button id="btn-quick-pay-student" class="btn btn-primary btn-glow">Pay Fees</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification System -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Scripts -->
+  <script src="./app.js"></script>
+</body>
+</html>
