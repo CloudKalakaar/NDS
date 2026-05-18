@@ -35,6 +35,13 @@ let pendingFilterMode = 'current';
 
 // ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', () => {
+  // Force reset document and body scroll positions to combat mobile browser reload shifts
+  window.scrollTo(0, 0);
+  document.body.scrollTop = 0;
+  if (document.documentElement) {
+    document.documentElement.scrollTop = 0;
+  }
+  
   initApp();
   registerServiceWorker();
   initViewRouting();
@@ -255,7 +262,8 @@ function initPullToRefresh() {
     if (!isPulling) return;
     isPulling = false;
     
-    const finalDistance = pullMoveY - pullStartY;
+    // Safety guard to ensure finalDistance is never negative (prevents Math.pow returning NaN)
+    const finalDistance = Math.max(0, pullMoveY - pullStartY);
     const dampenedDistance = Math.min(Math.pow(finalDistance, 0.85), PULL_MAX);
     
     pullIndicator.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)';

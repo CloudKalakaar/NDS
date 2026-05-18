@@ -100,18 +100,19 @@ h1, h2, h3, h4, h5, h6 {
 .app-shell {
   display: flex;
   flex-direction: column;
-  height: 100%; /* Fallback - exact height of parent body/iframe */
-  height: 100dvh; /* Modern standalone browser dynamic viewport height */
-  position: relative;
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
   max-width: 480px; /* Restrict width like a mobile phone app */
-  margin: 0 auto;   /* Center on desktop */
   background-color: var(--bg-primary);
   border-left: 1px solid var(--border-color);
   border-right: 1px solid var(--border-color);
   box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
   overflow: hidden; /* Lock parent size to viewport and let contents scroll internally */
+  padding-top: env(safe-area-inset-top);
 }
 
 /* Header */
