@@ -210,7 +210,8 @@ h1, h2, h3, h4, h5, h6 {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 76px;
+  box-sizing: content-box; /* Keep content area height completely stable */
+  height: 62px; /* Perfect content height */
   background: rgba(16, 19, 27, 0.85);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -219,7 +220,7 @@ h1, h2, h3, h4, h5, h6 {
   justify-content: space-around;
   align-items: center;
   padding: 0 10px;
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom); /* iOS dynamic spacing added on top */
   z-index: 10;
 }
 
@@ -231,19 +232,20 @@ h1, h2, h3, h4, h5, h6 {
   align-items: center;
   justify-content: center;
   color: var(--text-secondary);
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.25s var(--ease-smooth);
   width: 20%;
-  height: 100%;
+  height: 100%; /* Height matches exactly the 62px content height on all devices */
   position: relative;
+  box-sizing: border-box;
 }
 
 .tab-icon {
-  width: 22px;
-  height: 22px;
-  margin-bottom: 5px;
+  width: 20px; /* Sleeker icon sizing */
+  height: 20px;
+  margin-bottom: 4px;
   transition: transform 0.25s var(--ease-smooth);
 }
 

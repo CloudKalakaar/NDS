@@ -486,7 +486,7 @@ function renderDashboard() {
       const card = document.createElement('div');
       card.className = 'pending-card glass-card animated-fade-in';
       
-      const whatsappMsgText = `Hi ${student.parentName || student.name}, this is a friendly reminder from Niki Dance Studio (NDS) regarding ${student.name}'s fees of ₹${student.monthlyFee} pending for ${currentMonthName}. Kindly clear the pending fees. Thank you!`;
+      const whatsappMsgText = `Hi Sir/Madam, this is a friendly reminder from Niki Dance Studio (NDS) regarding ${student.name}'s fees of ₹${student.monthlyFee} pending for ${currentMonthName}. Kindly clear the pending fees. Thank you!`;
       const whatsappUrl = `https://api.whatsapp.com/send?phone=91${student.phone.trim()}&text=${encodeURIComponent(whatsappMsgText)}`;
       
       card.innerHTML = `
@@ -556,7 +556,7 @@ function renderDashboard() {
       const card = document.createElement('div');
       card.className = 'pending-card glass-card animated-fade-in due-card-warning';
       
-      const whatsappMsgText = `Hi ${student.parentName || student.name}, this is a reminder from Niki Dance Studio (NDS) regarding ${student.name}'s fees of ₹${student.monthlyFee} which is pending from ${dueMonthName}. Kindly clear the pending dues. Thank you!`;
+      const whatsappMsgText = `Hi Sir/Madam, this is a reminder from Niki Dance Studio (NDS) regarding ${student.name}'s fees of ₹${student.monthlyFee} which is pending from ${dueMonthName}. Kindly clear the pending dues. Thank you!`;
       const whatsappUrl = `https://api.whatsapp.com/send?phone=91${student.phone.trim()}&text=${encodeURIComponent(whatsappMsgText)}`;
       
       card.innerHTML = `
@@ -987,6 +987,13 @@ function initFormsAndModals() {
       document.getElementById('student-id-field').value = '';
       document.getElementById('student-form').reset();
       
+      // Clear legacy options from edit mode
+      const batchSelect = document.getElementById('student-batch');
+      Array.from(batchSelect.options).forEach(opt => {
+        if (opt.dataset.custom === 'true') opt.remove();
+      });
+      batchSelect.value = '';
+      
       const today = new Date().toISOString().split('T')[0];
       document.getElementById('student-admission').value = today;
       document.getElementById('student-fee').value = '1500';
@@ -1158,7 +1165,32 @@ function initFormsAndModals() {
       document.getElementById('student-name').value = student.name;
       document.getElementById('student-phone').value = student.phone;
       document.getElementById('student-parent').value = student.parentName || '';
-      document.getElementById('student-batch').value = student.batch || '';
+      
+      // Populate batch select dropdown with legacy safety fallback
+      const batchSelect = document.getElementById('student-batch');
+      const standardBatches = [
+        "Kids batch (batch 1)",
+        "Intermediate (batch 2)",
+        "Advanced batch (batch 3)",
+        "Gymnastics batch",
+        "Zumba batch"
+      ];
+      
+      // Clear previous custom options
+      Array.from(batchSelect.options).forEach(opt => {
+        if (opt.dataset.custom === 'true') opt.remove();
+      });
+      
+      // If legacy batch doesn't match new standard options, append it safely
+      if (student.batch && !standardBatches.includes(student.batch)) {
+        const legacyOpt = document.createElement('option');
+        legacyOpt.value = student.batch;
+        legacyOpt.textContent = `${student.batch} (Legacy)`;
+        legacyOpt.dataset.custom = 'true';
+        batchSelect.appendChild(legacyOpt);
+      }
+      batchSelect.value = student.batch || '';
+      
       document.getElementById('student-fee').value = student.monthlyFee;
       document.getElementById('student-admission').value = student.admissionDate || '';
       

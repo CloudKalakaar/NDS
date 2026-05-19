@@ -337,16 +337,17 @@
           </div>
           
           <div class="form-group">
-            <label for="student-batch">Dance Batch / Style</label>
-            <input type="text" id="student-batch" placeholder="e.g. Hip Hop (Mon/Wed)" list="batch-suggestions">
-            <datalist id="batch-suggestions">
-              <option value="Hip Hop Beginners">
-              <option value="Hip Hop Advanced">
-              <option value="Contemporary">
-              <option value="Zumba / Aerobics">
-              <option value="B-Boying & Breaking">
-              <option value="Kids Special Batch">
-            </datalist>
+            <label for="student-batch">Dance Batch / Style *</label>
+            <div class="custom-select-wrapper">
+              <select id="student-batch" required>
+                <option value="">-- Choose Batch --</option>
+                <option value="Kids batch (batch 1)">Kids batch (batch 1)</option>
+                <option value="Intermediate (batch 2)">Intermediate (batch 2)</option>
+                <option value="Advanced batch (batch 3)">Advanced batch (batch 3)</option>
+                <option value="Gymnastics batch">Gymnastics batch</option>
+                <option value="Zumba batch">Zumba batch</option>
+              </select>
+            </div>
           </div>
         </div>
         
