@@ -4,18 +4,32 @@
 let state = {
   masterName: '',
   students: [],
-  payments: []
+  payments: [],
+  batchPricing: {
+    "Kids batch (batch 1)": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 },
+    "Intermediate (batch 2)": { "1m": 2000, "3m": 5500, "6m": 10000, "12m": 19000 },
+    "Advanced batch (batch 3)": { "1m": 2500, "3m": 7000, "6m": 13000, "12m": 25000 },
+    "Gymnastics batch": { "1m": 1800, "3m": 5000, "6m": 9000, "12m": 17000 },
+    "Zumba batch": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 }
+  }
 };
 
 // Default Database Schema
 const DEFAULT_STATE = {
   masterName: '',
   students: [],
-  payments: []
+  payments: [],
+  batchPricing: {
+    "Kids batch (batch 1)": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 },
+    "Intermediate (batch 2)": { "1m": 2000, "3m": 5500, "6m": 10000, "12m": 19000 },
+    "Advanced batch (batch 3)": { "1m": 2500, "3m": 7000, "6m": 13000, "12m": 25000 },
+    "Gymnastics batch": { "1m": 1800, "3m": 5000, "6m": 9000, "12m": 17000 },
+    "Zumba batch": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 }
+  }
 };
 
 // DB Constants
-const LOCAL_STORAGE_KEY = 'nds_tracker_db';
+const LOCAL_STORAGE_KEY = 'nds_tracker_db_v2'; // Bump database namespace to cleanly handle date-to-date transition
 
 // Current View Tracker
 let currentView = 'dashboard';
@@ -83,12 +97,38 @@ function initApp() {
       state.students = state.students || [];
       state.payments = state.payments || [];
       state.masterName = state.masterName || '';
+      
+      // Fallback fallback upgrade if legacy local storage doesn't have batchPricing
+      if (!state.batchPricing) {
+        state.batchPricing = { ...DEFAULT_STATE.batchPricing };
+      }
     } catch (e) {
       console.error('Error parsing stored database, resetting to default.', e);
       state = { ...DEFAULT_STATE };
     }
   } else {
-    state = { ...DEFAULT_STATE };
+    // Check if legacy database (db namespace 1) exists, migrate it cleanly if available
+    const legacyData = localStorage.getItem('nds_tracker_db');
+    if (legacyData) {
+      try {
+        const legacyState = JSON.parse(legacyData);
+        state = {
+          masterName: legacyState.masterName || '',
+          students: legacyState.students || [],
+          payments: legacyState.payments || [],
+          batchPricing: { ...DEFAULT_STATE.batchPricing }
+        };
+        saveState();
+        // Clear old key
+        localStorage.removeItem('nds_tracker_db');
+        console.log('[NDS Schema Migration] Successfully migrated to date-to-date schema!');
+      } catch (err) {
+        console.error('[NDS Schema Migration] Failed to parse legacy database', err);
+        state = { ...DEFAULT_STATE };
+      }
+    } else {
+      state = { ...DEFAULT_STATE };
+    }
   }
 
   // Check Onboarding status
@@ -109,10 +149,8 @@ function initApp() {
   const studentAdmissionInput = document.getElementById('student-admission');
   if (studentAdmissionInput) studentAdmissionInput.value = today;
 
-  // Set default current month in payment forms
-  const currentMonthStr = new Date().toISOString().slice(0, 7); // YYYY-MM
-  const paymentMonthInput = document.getElementById('payment-month');
-  if (paymentMonthInput) paymentMonthInput.value = currentMonthStr;
+  // Initialize Settings Pricing Inputs on startup
+  initSettingsPricingSelector();
 }
 
 // Save DB State to LocalStorage
@@ -350,79 +388,121 @@ function renderActiveView() {
   }
 }
 
-// Get all unpaid months for a student from their admission date up to the current calendar month
-function getStudentDues(student) {
-  if (student.status !== 'active') return [];
-
-  const dues = [];
+// Get dynamic student membership status, due date, and overdue count (Date-to-Date Model)
+function getStudentMembershipStatus(student) {
+  if (student.status !== 'active') {
+    return { status: 'paused', text: 'Class Paused', dueDate: null, daysLeft: 0, daysOverdue: 0 };
+  }
+  
+  const payments = state.payments.filter(p => p.studentId === student.id);
   const today = new Date();
-  const currentMonthStr = today.toISOString().slice(0, 7); // YYYY-MM
-  
-  // Start from admission date (YYYY-MM), or fall back to current month if not available
-  let startMonthStr = currentMonthStr;
-  if (student.admissionDate) {
-    startMonthStr = student.admissionDate.slice(0, 7);
+  today.setHours(0, 0, 0, 0);
+
+  if (payments.length === 0) {
+    // Student has never paid. Dues start on their admissionDate (or today as fallback)
+    const admStr = student.admissionDate || today.toISOString().split('T')[0];
+    const admDate = new Date(admStr);
+    admDate.setHours(0, 0, 0, 0);
+    
+    const diffTime = today - admDate;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    return {
+      status: 'unpaid',
+      text: 'Never Paid',
+      dueDate: admStr,
+      daysOverdue: Math.max(0, diffDays),
+      daysLeft: 0
+    };
   }
   
-  // Ensure we don't go back infinitely (e.g. limit to maximum 12 months for sanity/performance)
-  let startYear = parseInt(startMonthStr.split('-')[0]);
-  let startMonth = parseInt(startMonthStr.split('-')[1]);
-  
-  let currentYear = today.getFullYear();
-  let currentMonth = today.getMonth() + 1; // 1-indexed
-  
-  // Loop from startMonth up to currentMonth
-  let loopYear = startYear;
-  let loopMonth = startMonth;
-  
-  while (loopYear < currentYear || (loopYear === currentYear && loopMonth <= currentMonth)) {
-    const monthStr = `${loopYear}-${String(loopMonth).padStart(2, '0')}`;
-    
-    // Check if there's a payment record for this month
-    const hasPaid = state.payments.some(p => p.studentId === student.id && p.monthPaidFor === monthStr);
-    
-    if (!hasPaid) {
-      dues.push(monthStr);
+  // Find the maximum validity end date across all payments
+  let latestEndDate = null;
+  payments.forEach(p => {
+    let endStr = p.endDate;
+    if (!endStr && p.monthPaidFor) {
+      // Legacy data fallback: Last day of monthPaidFor YYYY-MM
+      const [year, month] = p.monthPaidFor.split('-');
+      const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+      endStr = `${p.monthPaidFor}-${String(lastDay).padStart(2, '0')}`;
     }
     
-    // Increment month
-    loopMonth++;
-    if (loopMonth > 12) {
-      loopMonth = 1;
-      loopYear++;
+    if (endStr) {
+      const d = new Date(endStr);
+      if (!latestEndDate || d > latestEndDate) {
+        latestEndDate = d;
+      }
     }
+  });
+  
+  if (latestEndDate) {
+    latestEndDate.setHours(0, 0, 0, 0);
+    const latestEndDateStr = latestEndDate.toISOString().split('T')[0];
     
-    // Safety break (max 24 months dues tracking)
-    if (dues.length > 24) break;
+    if (latestEndDate < today) {
+      // Expired!
+      const diffTime = today - latestEndDate;
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+      return {
+        status: 'expired',
+        text: 'Expired',
+        dueDate: latestEndDateStr,
+        daysOverdue: diffDays,
+        daysLeft: 0
+      };
+    } else {
+      // Active Paid Membership!
+      const diffTime = latestEndDate - today;
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      return {
+        status: 'paid',
+        text: 'Paid / Active',
+        dueDate: latestEndDateStr,
+        daysOverdue: 0,
+        daysLeft: diffDays
+      };
+    }
   }
   
-  return dues;
+  const defaultDue = student.admissionDate || today.toISOString().split('T')[0];
+  return {
+    status: 'unpaid',
+    text: 'Never Paid',
+    dueDate: defaultDue,
+    daysOverdue: 0,
+    daysLeft: 0
+  };
 }
 
-// Get dues strictly prior to the current calendar month
-function getStudentPreviousDues(student) {
-  const allDues = getStudentDues(student);
-  const currentMonthStr = new Date().toISOString().slice(0, 7); // YYYY-MM
-  return allDues.filter(m => m < currentMonthStr);
+// Calculate Membership Validity End Date given Start Date and Plan Package
+function calculateEndDateFromStartDate(startDateStr, packageVal) {
+  if (!startDateStr) return '';
+  const d = new Date(startDateStr);
+  if (isNaN(d.getTime())) return '';
+  
+  let numMonths = 1;
+  if (packageVal === '3m') numMonths = 3;
+  else if (packageVal === '6m') numMonths = 6;
+  else if (packageVal === '12m') numMonths = 12;
+  else if (packageVal === 'custom') return ''; // Custom handles manually
+  
+  // Set month
+  d.setMonth(d.getMonth() + numMonths);
+  // Subtract 1 day for clean boundaries (e.g. May 15 to June 14)
+  d.setDate(d.getDate() - 1);
+  
+  return d.toISOString().split('T')[0];
 }
 
-// Quick Payment trigger for specific historical month
-window.triggerQuickPayDue = function(studentId, monthStr) {
+// Quick Payment trigger from Dashboard Outstanding cards
+window.triggerQuickPayDue = function(studentId) {
   triggerQuickPay(studentId);
-  const paymentMonthInput = document.getElementById('payment-month');
-  if (paymentMonthInput) {
-    paymentMonthInput.value = monthStr;
-  }
 };
 
-// Log specific month dues from details profile drawer
-window.payDueMonth = function(studentId, monthStr) {
+// Log dues from details profile drawer
+window.payDueMonth = function(studentId) {
   closeModal('student-detail-modal');
   triggerQuickPay(studentId);
-  const paymentMonthInput = document.getElementById('payment-month');
-  if (paymentMonthInput) {
-    paymentMonthInput.value = monthStr;
-  }
 };
 
 // ==================== VIEW 1: DASHBOARD LOGIC ====================
@@ -431,22 +511,32 @@ function renderDashboard() {
   const activeStudents = state.students.filter(s => s.status === 'active');
   document.getElementById('stat-total-students').textContent = activeStudents.length;
   
-  const currentMonthStr = new Date().toISOString().slice(0, 7); // YYYY-MM
-  const currentMonthName = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
+  const today = new Date();
+  const currentMonthStr = today.toISOString().slice(0, 7); // YYYY-MM
   
-  // Total Collected (Sum of payments registered for the current month)
-  const currentPayments = state.payments.filter(p => p.monthPaidFor === currentMonthStr);
+  // Total Collected (Sum of payments registered in the current month)
+  const currentPayments = state.payments.filter(p => p.datePaid && p.datePaid.slice(0, 7) === currentMonthStr);
   const totalCollected = currentPayments.reduce((sum, p) => sum + parseInt(p.amount || 0), 0);
   document.getElementById('stat-collected').textContent = `₹${totalCollected.toLocaleString('en-IN')}`;
   
-  // Find which active students HAVE NOT paid for this month
-  const unpaidStudents = activeStudents.filter(student => {
-    const hasPaid = state.payments.some(p => p.studentId === student.id && p.monthPaidFor === currentMonthStr);
-    return !hasPaid;
+  // Group expired/unpaid active students into This Month vs Previous Months
+  const unpaidThisMonth = [];
+  const unpaidPreviousMonths = [];
+  
+  activeStudents.forEach(student => {
+    const memStatus = getStudentMembershipStatus(student);
+    if (memStatus.status === 'expired' || memStatus.status === 'unpaid') {
+      const dueMonth = memStatus.dueDate.slice(0, 7);
+      if (dueMonth === currentMonthStr) {
+        unpaidThisMonth.push({ student, memStatus });
+      } else if (memStatus.dueDate < currentMonthStr + '-01') {
+        unpaidPreviousMonths.push({ student, memStatus });
+      }
+    }
   });
   
-  // Calculate Pending Fees (Current Month)
-  const totalPending = unpaidStudents.reduce((sum, s) => sum + parseInt(s.monthlyFee || 0), 0);
+  // Calculate Pending Fees (Current Month Standard Batch Price)
+  const totalPending = unpaidThisMonth.reduce((sum, s) => sum + parseInt(s.student.monthlyFee || 0), 0);
   document.getElementById('stat-pending').textContent = `₹${totalPending.toLocaleString('en-IN')}`;
   
   // Calculate collection progress bar
@@ -465,14 +555,14 @@ function renderDashboard() {
   
   if (pendingFilterMode === 'current') {
     sectionTitle.textContent = 'FEES PENDING THIS MONTH';
-    pendingCountBadge.textContent = unpaidStudents.length;
-    if (unpaidStudents.length > 0) {
+    pendingCountBadge.textContent = unpaidThisMonth.length;
+    if (unpaidThisMonth.length > 0) {
       pendingCountBadge.className = 'badge badge-red';
     } else {
       pendingCountBadge.className = 'badge badge-outline';
     }
     
-    if (unpaidStudents.length === 0) {
+    if (unpaidThisMonth.length === 0) {
       pendingListContainer.innerHTML = `
         <div class="empty-state">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
@@ -482,11 +572,18 @@ function renderDashboard() {
       return;
     }
     
-    unpaidStudents.forEach(student => {
+    unpaidThisMonth.forEach(item => {
+      const student = item.student;
+      const memStatus = item.memStatus;
+      
       const card = document.createElement('div');
       card.className = 'pending-card glass-card animated-fade-in';
       
-      const whatsappMsgText = `Hi Sir/Madam, this is a friendly reminder from Niki Dance Studio (NDS) regarding ${student.name}'s fees of ₹${student.monthlyFee} pending for ${currentMonthName}. Kindly clear the pending fees. Thank you!`;
+      // Formatting due date
+      const dueFormatted = new Date(memStatus.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+      const statusText = memStatus.status === 'unpaid' ? `Never paid (Admitted: ${dueFormatted})` : `Expired on: ${dueFormatted}`;
+      
+      const whatsappMsgText = `Hi Sir/Madam, this is a friendly reminder from Niki Dance Studio (NDS) regarding ${student.name}'s fees of ₹${student.monthlyFee} pending. Current validity ended/due on: ${dueFormatted}. Kindly clear the pending fees. Thank you!`;
       const whatsappUrl = `https://api.whatsapp.com/send?phone=91${student.phone.trim()}&text=${encodeURIComponent(whatsappMsgText)}`;
       
       card.innerHTML = `
@@ -495,7 +592,9 @@ function renderDashboard() {
           <span class="pending-details">
             ${student.batch || 'General Batch'} • <span class="pending-amount">₹${parseInt(student.monthlyFee || 0).toLocaleString('en-IN')}</span>
           </span>
-          ${student.parentName ? `<span class="pending-parent">Parent: ${student.parentName}</span>` : ''}
+          <span class="pending-details" style="font-size: 0.72rem; color: var(--brand-red); margin-top: 2px;">
+            ${statusText}
+          </span>
         </div>
         <div class="pending-actions">
           <a href="tel:${student.phone}" class="action-btn-circle call" title="Call Student">
@@ -513,30 +612,14 @@ function renderDashboard() {
     });
   } else {
     sectionTitle.textContent = 'PREVIOUS MONTHS UNPAID DUES';
-    
-    // Find all outstanding previous months dues
-    const previousDues = [];
-    activeStudents.forEach(student => {
-      const studentDues = getStudentPreviousDues(student);
-      studentDues.forEach(dueMonth => {
-        previousDues.push({
-          student,
-          monthStr: dueMonth
-        });
-      });
-    });
-    
-    // Sort dues oldest month first
-    previousDues.sort((a, b) => a.monthStr.localeCompare(b.monthStr));
-    
-    pendingCountBadge.textContent = previousDues.length;
-    if (previousDues.length > 0) {
+    pendingCountBadge.textContent = unpaidPreviousMonths.length;
+    if (unpaidPreviousMonths.length > 0) {
       pendingCountBadge.className = 'badge badge-warning';
     } else {
       pendingCountBadge.className = 'badge badge-outline';
     }
     
-    if (previousDues.length === 0) {
+    if (unpaidPreviousMonths.length === 0) {
       pendingListContainer.innerHTML = `
         <div class="empty-state">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"></circle><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
@@ -546,27 +629,30 @@ function renderDashboard() {
       return;
     }
     
-    previousDues.forEach(item => {
+    unpaidPreviousMonths.forEach(item => {
       const student = item.student;
-      const dueMonthStr = item.monthStr;
+      const memStatus = item.memStatus;
       
-      // Format month string beautifully, e.g. "April 2026"
-      const dueMonthName = new Date(dueMonthStr + '-02').toLocaleString('default', { month: 'long', year: 'numeric' });
+      // Format due date
+      const dueFormatted = new Date(memStatus.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
       
       const card = document.createElement('div');
       card.className = 'pending-card glass-card animated-fade-in due-card-warning';
       
-      const whatsappMsgText = `Hi Sir/Madam, this is a reminder from Niki Dance Studio (NDS) regarding ${student.name}'s fees of ₹${student.monthlyFee} which is pending from ${dueMonthName}. Kindly clear the pending dues. Thank you!`;
+      const whatsappMsgText = `Hi Sir/Madam, this is a reminder from Niki Dance Studio (NDS) regarding ${student.name}'s fees of ₹${student.monthlyFee} which is pending. Membership overdue since: ${dueFormatted} (${memStatus.daysOverdue} days overdue). Kindly clear the pending dues. Thank you!`;
       const whatsappUrl = `https://api.whatsapp.com/send?phone=91${student.phone.trim()}&text=${encodeURIComponent(whatsappMsgText)}`;
       
       card.innerHTML = `
         <div class="pending-info">
           <span class="pending-student-name">${student.name}</span>
           <span class="pending-details" style="margin-bottom: 2px;">
-            <span class="badge badge-warning" style="font-size:0.6rem; padding:2px 6px; display:inline-block;">Due: ${dueMonthName}</span>
+            <span class="badge badge-warning" style="font-size:0.6rem; padding:2px 6px; display:inline-block;">Overdue: ${memStatus.daysOverdue} days</span>
           </span>
           <span class="pending-details">
             ${student.batch || 'General Batch'} • <span class="pending-amount">₹${parseInt(student.monthlyFee || 0).toLocaleString('en-IN')}</span>
+          </span>
+          <span class="pending-details" style="font-size: 0.72rem; color: var(--warning-gold); margin-top: 2.5px;">
+            Due Date: ${dueFormatted}
           </span>
         </div>
         <div class="pending-actions">
@@ -576,7 +662,7 @@ function renderDashboard() {
           <a href="${whatsappUrl}" target="_blank" class="action-btn-circle whatsapp" title="Send WhatsApp Reminder">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
           </a>
-          <button class="action-btn-circle pay" onclick="triggerQuickPayDue('${student.id}', '${dueMonthStr}')" title="Log Due Payment">
+          <button class="action-btn-circle pay" onclick="triggerQuickPay('${student.id}')" title="Log Payment">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect><line x1="12" y1="10" x2="12" y2="10"></line><line x1="2" y1="10" x2="22" y2="10"></line></svg>
           </button>
         </div>
@@ -608,16 +694,33 @@ window.triggerQuickPay = function(studentId) {
     studentSelect.value = student.id;
   }
   
-  // Auto-fill fee amount
+  // Fetch membership details to calculate default dates
+  const memStatus = getStudentMembershipStatus(student);
+  const startDateInput = document.getElementById('payment-start-date');
+  const endDateInput = document.getElementById('payment-end-date');
+  const packageSelect = document.getElementById('payment-package');
   const amountField = document.getElementById('payment-amount');
-  if (amountField) {
-    amountField.value = student.monthlyFee;
+  
+  // Default start date: if expired/paid before, day after the latest expiration date. If never paid, admissionDate or today.
+  let defaultStartStr = student.admissionDate || new Date().toISOString().split('T')[0];
+  if (memStatus.status === 'expired' || memStatus.status === 'paid') {
+    // Add 1 day to the previous due date to start the next period
+    const lastEnd = new Date(memStatus.dueDate);
+    lastEnd.setDate(lastEnd.getDate() + 1);
+    defaultStartStr = lastEnd.toISOString().split('T')[0];
   }
-
-  // Set default current month in payment forms
-  const currentMonthStr = new Date().toISOString().slice(0, 7); // YYYY-MM
-  const paymentMonthInput = document.getElementById('payment-month');
-  if (paymentMonthInput) paymentMonthInput.value = currentMonthStr;
+  
+  if (startDateInput) {
+    startDateInput.value = defaultStartStr;
+  }
+  
+  // Default package: 1 Month
+  if (packageSelect) {
+    packageSelect.value = '1m';
+  }
+  
+  // Trigger update to calculate default price & end date based on batch configuration
+  updateCalculatedPaymentFields();
 };
 
 // Populate dynamic select list of active students for log payment modal (Global function)
@@ -641,11 +744,30 @@ function populateStudentDropdown() {
   // Wire change listener using standard onchange to overwrite duplicates
   studentSelect.onchange = () => {
     const sId = studentSelect.value;
-    const amountField = document.getElementById('payment-amount');
-    if (sId && amountField) {
+    if (sId) {
       const student = state.students.find(s => s.id === sId);
       if (student) {
-        amountField.value = student.monthlyFee || '';
+        // Fetch membership details to calculate default start date
+        const memStatus = getStudentMembershipStatus(student);
+        const startDateInput = document.getElementById('payment-start-date');
+        const packageSelect = document.getElementById('payment-package');
+        
+        let defaultStartStr = student.admissionDate || new Date().toISOString().split('T')[0];
+        if (memStatus.status === 'expired' || memStatus.status === 'paid') {
+          const lastEnd = new Date(memStatus.dueDate);
+          lastEnd.setDate(lastEnd.getDate() + 1);
+          defaultStartStr = lastEnd.toISOString().split('T')[0];
+        }
+        
+        if (startDateInput) {
+          startDateInput.value = defaultStartStr;
+        }
+        
+        if (packageSelect) {
+          packageSelect.value = '1m';
+        }
+        
+        updateCalculatedPaymentFields();
       }
     }
   };
@@ -777,14 +899,22 @@ function showStudentDetails(studentId) {
   const admDate = student.admissionDate ? new Date(student.admissionDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Not Listed';
   document.getElementById('detail-student-admission').textContent = admDate;
   
-  // Chip styling
+  // Chip styling & Membership Status
   const statusBadge = document.getElementById('detail-status-badge');
-  if (student.status === 'active') {
-    statusBadge.textContent = 'Active Enrolled';
-    statusBadge.className = 'badge badge-success';
-  } else {
+  const memStatus = getStudentMembershipStatus(student);
+  
+  if (student.status !== 'active') {
     statusBadge.textContent = 'Paused Class';
     statusBadge.className = 'badge badge-warning';
+  } else if (memStatus.status === 'paid') {
+    statusBadge.textContent = `Paid (Expires: ${new Date(memStatus.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })})`;
+    statusBadge.className = 'badge badge-success';
+  } else if (memStatus.status === 'expired') {
+    statusBadge.textContent = `Overdue (${memStatus.daysOverdue} days)`;
+    statusBadge.className = 'badge badge-danger';
+  } else {
+    statusBadge.textContent = 'Never Paid';
+    statusBadge.className = 'badge badge-danger';
   }
   
   document.getElementById('detail-monthly-fee-badge').textContent = `₹${parseInt(student.monthlyFee || 0).toLocaleString('en-IN')} / month`;
@@ -794,24 +924,25 @@ function showStudentDetails(studentId) {
   const duesList = document.getElementById('detail-dues-list');
   
   if (duesWrapper && duesList) {
-    const previousDues = getStudentPreviousDues(student);
-    if (previousDues.length === 0) {
+    if (student.status !== 'active' || memStatus.status === 'paid') {
       duesWrapper.style.display = 'none';
     } else {
       duesWrapper.style.display = 'block';
       duesList.innerHTML = '';
       
-      previousDues.forEach(dueMonth => {
-        const dueMonthName = new Date(dueMonth + '-02').toLocaleString('default', { month: 'long', year: 'numeric' });
-        
-        const row = document.createElement('div');
-        row.className = 'detail-due-row';
-        row.innerHTML = `
-          <span><strong class="text-gold">${dueMonthName} Dues</strong> (₹${parseInt(student.monthlyFee || 0).toLocaleString('en-IN')})</span>
-          <button class="btn btn-secondary btn-sm" onclick="payDueMonth('${student.id}', '${dueMonth}')" style="padding: 4px 10px; font-size: 0.72rem; border-color: rgba(245, 158, 11, 0.3);">Collect</button>
-        `;
-        duesList.appendChild(row);
-      });
+      const dueFormatted = new Date(memStatus.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+      const dueText = memStatus.status === 'unpaid' ? `Never paid (Admitted: ${dueFormatted})` : `Expired on ${dueFormatted} (${memStatus.daysOverdue} days overdue)`;
+      
+      const row = document.createElement('div');
+      row.className = 'detail-due-row';
+      row.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:2px;">
+          <span style="font-weight:700; color:var(--brand-white); font-size:0.78rem;">Pending Fee Payment</span>
+          <span style="font-size:0.7rem; color:var(--text-secondary);">${dueText}</span>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="payDueMonth('${student.id}')" style="padding: 6px 12px; font-size: 0.72rem; border-color: rgba(245, 158, 11, 0.3);">Collect</button>
+      `;
+      duesList.appendChild(row);
     }
   }
   
@@ -827,13 +958,27 @@ function showStudentDetails(studentId) {
     historyList.innerHTML = `<div class="detail-payment-row empty-row">No recorded fee receipt.</div>`;
   } else {
     studentPayments.forEach(p => {
-      const monthYear = new Date(p.monthPaidFor + '-02').toLocaleDateString('default', { month: 'short', year: 'numeric' });
+      // Validity duration display fallback
+      let validityText = '';
+      if (p.startDate && p.endDate) {
+        const startStr = new Date(p.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' });
+        const endStr = new Date(p.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' });
+        validityText = `Validity: ${startStr} to ${endStr}`;
+      } else if (p.monthPaidFor) {
+        // Fallback for legacy database entries
+        const monthYear = new Date(p.monthPaidFor + '-02').toLocaleDateString('default', { month: 'short', year: 'numeric' });
+        validityText = `${monthYear} Month Fees`;
+      }
+      
       const payDate = new Date(p.datePaid).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
       
       const row = document.createElement('div');
       row.className = 'detail-payment-row';
       row.innerHTML = `
-        <span><strong>${monthYear} Fees</strong> (Paid on ${payDate})</span>
+        <div style="display:flex; flex-direction:column; gap:2px;">
+          <span style="font-weight:600;">${validityText}</span>
+          <span style="font-size:0.7rem; color:var(--text-muted);">Receipt Date: ${payDate}</span>
+        </div>
         <span><strong>₹${parseInt(p.amount || 0).toLocaleString('en-IN')}</strong> (${p.method || 'Cash'})</span>
       `;
       historyList.appendChild(row);
@@ -861,9 +1006,9 @@ function renderHistory() {
   
   let filtered = state.payments;
   
-  // Filter by month
+  // Filter by payment date month (datePaid starts with YYYY-MM)
   if (selectedMonth) {
-    filtered = filtered.filter(p => p.monthPaidFor === selectedMonth);
+    filtered = filtered.filter(p => p.datePaid && p.datePaid.slice(0, 7) === selectedMonth);
   }
   
   // Sort payments by date descending (newest first)
@@ -895,7 +1040,24 @@ function renderHistory() {
     
     // Formatting Dates
     const paidDateFormatted = new Date(p.datePaid).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-    const forMonthFormatted = new Date(p.monthPaidFor + '-02').toLocaleDateString('default', { month: 'long', year: 'numeric' });
+    
+    // Calculate validity description
+    let validityText = '';
+    if (p.startDate && p.endDate) {
+      const startStr = new Date(p.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+      const endStr = new Date(p.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+      validityText = `Validity: ${startStr} to ${endStr}`;
+    } else if (p.monthPaidFor) {
+      const monthYear = new Date(p.monthPaidFor + '-02').toLocaleDateString('default', { month: 'short', year: 'numeric' });
+      validityText = `Month: ${monthYear}`;
+    }
+    
+    // Translate package to badge label
+    let packageLabel = '1 Month';
+    if (p.package === '3m') packageLabel = '3 Months';
+    else if (p.package === '6m') packageLabel = '6 Months';
+    else if (p.package === '12m') packageLabel = '1 Year';
+    else if (p.package === 'custom') packageLabel = 'Custom';
     
     const card = document.createElement('div');
     card.className = 'history-card glass-card animated-fade-in';
@@ -903,6 +1065,9 @@ function renderHistory() {
     card.innerHTML = `
       <div class="history-left">
         <span class="history-student-name">${studentName}</span>
+        <span class="history-meta" style="margin-bottom: 2px;">
+          ${validityText}
+        </span>
         <span class="history-meta">
           Paid on ${paidDateFormatted} • <span class="history-mode">${p.method || 'Cash'}</span>
         </span>
@@ -910,7 +1075,7 @@ function renderHistory() {
       </div>
       <div class="history-right">
         <span class="history-amount">+ ₹${parseInt(p.amount || 0).toLocaleString('en-IN')}</span>
-        <span class="badge badge-success history-month-tag">${new Date(p.monthPaidFor + '-02').toLocaleDateString('default', { month: 'short' })}</span>
+        <span class="badge badge-success history-month-tag">${packageLabel}</span>
       </div>
     `;
     listContainer.appendChild(card);
@@ -1017,17 +1182,19 @@ function initFormsAndModals() {
       document.getElementById('payment-student-locked-container').style.display = 'none';
       document.getElementById('payment-student-label').textContent = 'Select Student *';
       
-      // Seed date and month
+      // Seed date and package
       const today = new Date().toISOString().split('T')[0];
       document.getElementById('payment-date').value = today;
-      
-      const currentMonthStr = new Date().toISOString().slice(0, 7);
-      document.getElementById('payment-month').value = currentMonthStr;
+      document.getElementById('payment-start-date').value = today;
+      document.getElementById('payment-package').value = '1m';
       
       document.getElementById('payment-modal-title').textContent = 'RECORD FEE PAYMENT';
       
       // Populate student options list
       populateStudentDropdown();
+      
+      // Trigger default calculation updates
+      updateCalculatedPaymentFields();
       
       openModal('payment-modal');
     });
@@ -1097,7 +1264,9 @@ function initFormsAndModals() {
       const paymentId = document.getElementById('payment-id-field').value;
       const studentId = document.getElementById('payment-student-id').value;
       const amount = parseInt(document.getElementById('payment-amount').value || 0);
-      const monthPaidFor = document.getElementById('payment-month').value; // YYYY-MM
+      const packageVal = document.getElementById('payment-package').value;
+      const startDate = document.getElementById('payment-start-date').value;
+      const endDate = document.getElementById('payment-end-date').value;
       const datePaid = document.getElementById('payment-date').value;
       const method = document.getElementById('payment-method').value;
       const remarks = document.getElementById('payment-remarks').value.trim();
@@ -1111,15 +1280,16 @@ function initFormsAndModals() {
           id: 'pay_' + Date.now(),
           studentId,
           amount,
-          monthPaidFor,
+          package: packageVal,
+          startDate,
+          endDate,
           datePaid,
           method,
           remarks
         };
         state.payments.push(newPayment);
         
-        const monthName = new Date(monthPaidFor + '-02').toLocaleDateString('default', { month: 'long' });
-        showToast(`Fees receipt logged for ${studentName} (${monthName})!`, 'success');
+        showToast(`Fees receipt logged for ${studentName}!`, 'success');
       }
       
       saveState();
@@ -1375,3 +1545,116 @@ window.showToast = function(message, type = 'success') {
     }, 300);
   }, 4000);
 };
+
+// ==================== BATCH FEES & PACKAGE CONFIGURATION (SETTINGS) ====================
+function initSettingsPricingSelector() {
+  const batchSelector = document.getElementById('settings-batch-selector');
+  const form = document.getElementById('settings-batch-fees-form');
+  
+  if (!batchSelector || !form) return;
+  
+  const f1m = document.getElementById('settings-fee-1m');
+  const f3m = document.getElementById('settings-fee-3m');
+  const f6m = document.getElementById('settings-fee-6m');
+  const f12m = document.getElementById('settings-fee-12m');
+  
+  // Function to load values into form inputs based on selected batch
+  function loadBatchPricingValues() {
+    const batch = batchSelector.value;
+    const pricing = state.batchPricing[batch] || { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 };
+    
+    f1m.value = pricing["1m"] || 1500;
+    f3m.value = pricing["3m"] || 4000;
+    f6m.value = pricing["6m"] || 7500;
+    f12m.value = pricing["12m"] || 14000;
+  }
+  
+  // Trigger load on dropdown change
+  batchSelector.addEventListener('change', loadBatchPricingValues);
+  
+  // Initial load on launch
+  loadBatchPricingValues();
+  
+  // Form submit handler
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const batch = batchSelector.value;
+    
+    state.batchPricing[batch] = {
+      "1m": parseInt(f1m.value || 0),
+      "3m": parseInt(f3m.value || 0),
+      "6m": parseInt(f6m.value || 0),
+      "12m": parseInt(f12m.value || 0)
+    };
+    
+    saveState();
+    showToast(`Saved package rates for ${batch}!`, 'success');
+  });
+}
+
+// ==================== DYNAMIC PAYMENT DIALOG CALCULATOR ====================
+function updateCalculatedPaymentFields() {
+  const studentSelect = document.getElementById('payment-student-id');
+  const packageSelect = document.getElementById('payment-package');
+  const startDateInput = document.getElementById('payment-start-date');
+  const endDateInput = document.getElementById('payment-end-date');
+  const amountField = document.getElementById('payment-amount');
+  
+  if (!studentSelect || !packageSelect || !startDateInput || !endDateInput || !amountField) return;
+  
+  const sId = studentSelect.value;
+  const packageVal = packageSelect.value;
+  const startDateVal = startDateInput.value;
+  
+  if (!sId) {
+    // No student chosen yet
+    return;
+  }
+  
+  const student = state.students.find(s => s.id === sId);
+  if (!student) return;
+  
+  // 1. Fetch pricing configuration for student's batch
+  const batch = student.batch || "Kids batch (batch 1)";
+  const pricing = state.batchPricing[batch] || { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 };
+  
+  if (packageVal !== 'custom') {
+    // Make end-date and amount read-only or styled, but keep them editable for ultimate custom overrides
+    endDateInput.readOnly = false;
+    amountField.readOnly = false;
+    
+    // Auto-calculate end-date
+    const calcEnd = calculateEndDateFromStartDate(startDateVal, packageVal);
+    if (calcEnd) {
+      endDateInput.value = calcEnd;
+    }
+    
+    // Auto-calculate package price
+    const calcPrice = pricing[packageVal] || 1500;
+    amountField.value = calcPrice;
+  } else {
+    // Custom period - let user edit freely
+    endDateInput.readOnly = false;
+    amountField.readOnly = false;
+  }
+}
+
+// Wire events for payment calculation updates in the form
+document.addEventListener('DOMContentLoaded', () => {
+  const packageSelect = document.getElementById('payment-package');
+  const startDateInput = document.getElementById('payment-start-date');
+  
+  if (packageSelect) {
+    packageSelect.addEventListener('change', updateCalculatedPaymentFields);
+  }
+  if (startDateInput) {
+    startDateInput.addEventListener('change', updateCalculatedPaymentFields);
+  }
+});
+// Fallback direct bindings for modals
+setTimeout(() => {
+  const pSelect = document.getElementById('payment-package');
+  const pStart = document.getElementById('payment-start-date');
+  if (pSelect) pSelect.addEventListener('change', updateCalculatedPaymentFields);
+  if (pStart) pStart.addEventListener('change', updateCalculatedPaymentFields);
+}, 500);

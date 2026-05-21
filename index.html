@@ -188,11 +188,12 @@
             <input type="text" id="history-search-input" placeholder="Search by student name...">
           </div>
           
-          <div class="filter-row">
-            <div class="custom-select-wrapper">
-              <input type="month" id="history-month-filter" class="month-input-filter">
+          <div class="filter-row" style="align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 8px; flex: 1;">
+              <span class="info-lbl" style="font-size: 0.72rem; font-weight: 700; text-transform: uppercase;">Filter Paid Month:</span>
+              <input type="month" id="history-month-filter" class="month-input-filter" style="flex: 1; min-width: 120px;">
             </div>
-            <button id="clear-month-filter" class="btn btn-secondary btn-sm" style="display: none;">Clear Month</button>
+            <button id="clear-month-filter" class="btn btn-secondary btn-sm" style="display: none; margin-left: 8px;">Clear</button>
           </div>
         </div>
 
@@ -215,6 +216,51 @@
                 <input type="text" id="settings-master-name" placeholder="e.g. Niki" required>
               </div>
               <button type="submit" class="btn btn-primary btn-sm">Update Profile Name</button>
+            </form>
+          </div>
+
+          <!-- Batch Pricing & Packages Config Card -->
+          <div class="settings-section glass-card">
+            <h3 class="settings-section-title italic-heading">BATCH FEES & PACKAGES</h3>
+            <p class="settings-help-text">Configure standard monthly pricing and multi-month packages (3, 6, 12 months) for each dance batch.</p>
+            
+            <form id="settings-batch-fees-form">
+              <div class="form-group">
+                <label for="settings-batch-selector">Select Batch to Configure</label>
+                <div class="custom-select-wrapper">
+                  <select id="settings-batch-selector">
+                    <option value="Kids batch (batch 1)">Kids batch (batch 1)</option>
+                    <option value="Intermediate (batch 2)">Intermediate (batch 2)</option>
+                    <option value="Advanced batch (batch 3)">Advanced batch (batch 3)</option>
+                    <option value="Gymnastics batch">Gymnastics batch</option>
+                    <option value="Zumba batch">Zumba batch</option>
+                  </select>
+                </div>
+              </div>
+              
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="settings-fee-1m">1 Month Standard (₹)</label>
+                  <input type="number" id="settings-fee-1m" required min="0" placeholder="1500">
+                </div>
+                <div class="form-group">
+                  <label for="settings-fee-3m">3 Months Package (₹)</label>
+                  <input type="number" id="settings-fee-3m" required min="0" placeholder="4000">
+                </div>
+              </div>
+              
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="settings-fee-6m">6 Months Package (₹)</label>
+                  <input type="number" id="settings-fee-6m" required min="0" placeholder="7500">
+                </div>
+                <div class="form-group">
+                  <label for="settings-fee-12m">12 Months Package (₹)</label>
+                  <input type="number" id="settings-fee-12m" required min="0" placeholder="14000">
+                </div>
+              </div>
+              
+              <button type="submit" class="btn btn-primary btn-sm btn-glow">Save Pricing Package</button>
             </form>
           </div>
 
@@ -409,34 +455,53 @@
           </div>
         </div>
         
+        <!-- Package Plan / Price Select Dropdown -->
+        <div class="form-group">
+          <label for="payment-package">Membership Package / Plan</label>
+          <div class="custom-select-wrapper">
+            <select id="payment-package" required>
+              <option value="1m">1 Month (Standard)</option>
+              <option value="3m">3 Months Package (Discounted)</option>
+              <option value="6m">6 Months Package (Discounted)</option>
+              <option value="12m">12 Months Package (Discounted)</option>
+              <option value="custom">Custom Period / Custom Amount</option>
+            </select>
+          </div>
+        </div>
+
         <div class="form-row">
           <div class="form-group">
-            <label for="payment-month">Fees for Month *</label>
-            <input type="month" id="payment-month" required>
+            <label for="payment-start-date">Validity Start Date *</label>
+            <input type="date" id="payment-start-date" required>
           </div>
           
           <div class="form-group">
-            <label for="payment-amount">Amount Paid (₹) *</label>
-            <input type="number" id="payment-amount" required min="0" placeholder="1500">
+            <label for="payment-end-date">Validity End Date *</label>
+            <input type="date" id="payment-end-date" required>
           </div>
         </div>
         
         <div class="form-row">
           <div class="form-group">
-            <label for="payment-date">Payment Date *</label>
-            <input type="date" id="payment-date" required>
+            <label for="payment-amount">Amount Paid (₹) *</label>
+            <input type="number" id="payment-amount" required min="0" placeholder="1500">
           </div>
           
           <div class="form-group">
-            <label for="payment-method">Payment Mode</label>
-            <div class="custom-select-wrapper">
-              <select id="payment-method">
-                <option value="Cash">Cash</option>
-                <option value="GPay / PhonePe / UPI">GPay / PhonePe / UPI</option>
-                <option value="Bank Transfer">Bank Transfer</option>
-                <option value="Card">Card</option>
-              </select>
-            </div>
+            <label for="payment-date">Payment Date *</label>
+            <input type="date" id="payment-date" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="payment-method">Payment Mode</label>
+          <div class="custom-select-wrapper">
+            <select id="payment-method">
+              <option value="Cash">Cash</option>
+              <option value="GPay / PhonePe / UPI">GPay / PhonePe / UPI</option>
+              <option value="Bank Transfer">Bank Transfer</option>
+              <option value="Card">Card</option>
+            </select>
           </div>
         </div>
 
