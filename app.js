@@ -514,22 +514,23 @@ function renderDashboard() {
   const today = new Date();
   const currentMonthStr = today.toISOString().slice(0, 7); // YYYY-MM
   
-  // Total Collected (Sum of payments registered in the current month)
+  // FIX 2: Use actual datePaid value for collection total (not the entry date)
   const currentPayments = state.payments.filter(p => p.datePaid && p.datePaid.slice(0, 7) === currentMonthStr);
   const totalCollected = currentPayments.reduce((sum, p) => sum + parseInt(p.amount || 0), 0);
   document.getElementById('stat-collected').textContent = `₹${totalCollected.toLocaleString('en-IN')}`;
   
-  // Group expired/unpaid active students into This Month vs Previous Months
+  // FIX 1: All expired/unpaid students show in current month list.
+  // Previous months list shows the same students but highlights how long they've been overdue.
   const unpaidThisMonth = [];
   const unpaidPreviousMonths = [];
   
   activeStudents.forEach(student => {
     const memStatus = getStudentMembershipStatus(student);
     if (memStatus.status === 'expired' || memStatus.status === 'unpaid') {
-      const dueMonth = memStatus.dueDate.slice(0, 7);
-      if (dueMonth === currentMonthStr) {
-        unpaidThisMonth.push({ student, memStatus });
-      } else if (memStatus.dueDate < currentMonthStr + '-01') {
+      // Always add to current month pending — they still owe fees NOW
+      unpaidThisMonth.push({ student, memStatus });
+      // Also add to previous months list if expired before this month (to show overdue history)
+      if (memStatus.dueDate < currentMonthStr + '-01') {
         unpaidPreviousMonths.push({ student, memStatus });
       }
     }
@@ -583,7 +584,11 @@ function renderDashboard() {
       const dueFormatted = new Date(memStatus.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
       const statusText = memStatus.status === 'unpaid' ? `Never paid (Admitted: ${dueFormatted})` : `Expired on: ${dueFormatted}`;
       
-      const whatsappMsgText = `Hi Sir/Madam, this is a friendly reminder from Niki Dance Studio (NDS) regarding ${student.name}'s fees of ₹${student.monthlyFee} pending. Current validity ended/due on: ${dueFormatted}. Kindly clear the pending fees. Thank you!`;
+      // FIX 3: Build full package price list for the student's batch
+      const batch = student.batch || 'Kids batch (batch 1)';
+      const pricing = state.batchPricing[batch] || { '1m': 1500, '3m': 4000, '6m': 7500, '12m': 14000 };
+      const packageList = `1 Month: ₹${pricing['1m']} | 3 Months: ₹${pricing['3m']} | 6 Months: ₹${pricing['6m']} | 12 Months: ₹${pricing['12m']}`;
+      const whatsappMsgText = `Hi Sir/Madam, this is a friendly reminder from Niki Dance Studio (NDS) regarding ${student.name}'s fees. Validity ended on: ${dueFormatted}.\n\nFee Packages (${batch}):\n${packageList}\n\nKindly clear the pending fees. Thank you!`;
       const whatsappUrl = `https://api.whatsapp.com/send?phone=91${student.phone.trim()}&text=${encodeURIComponent(whatsappMsgText)}`;
       
       card.innerHTML = `
@@ -639,7 +644,11 @@ function renderDashboard() {
       const card = document.createElement('div');
       card.className = 'pending-card glass-card animated-fade-in due-card-warning';
       
-      const whatsappMsgText = `Hi Sir/Madam, this is a reminder from Niki Dance Studio (NDS) regarding ${student.name}'s fees of ₹${student.monthlyFee} which is pending. Membership overdue since: ${dueFormatted} (${memStatus.daysOverdue} days overdue). Kindly clear the pending dues. Thank you!`;
+      // FIX 3: Full package price list in previous-months reminder too
+      const batchPrev = student.batch || 'Kids batch (batch 1)';
+      const pricingPrev = state.batchPricing[batchPrev] || { '1m': 1500, '3m': 4000, '6m': 7500, '12m': 14000 };
+      const packageListPrev = `1 Month: ₹${pricingPrev['1m']} | 3 Months: ₹${pricingPrev['3m']} | 6 Months: ₹${pricingPrev['6m']} | 12 Months: ₹${pricingPrev['12m']}`;
+      const whatsappMsgText = `Hi Sir/Madam, this is a reminder from Niki Dance Studio (NDS) regarding ${student.name}'s fees. Overdue since: ${dueFormatted} (${memStatus.daysOverdue} days).\n\nFee Packages (${batchPrev}):\n${packageListPrev}\n\nKindly clear the pending dues. Thank you!`;
       const whatsappUrl = `https://api.whatsapp.com/send?phone=91${student.phone.trim()}&text=${encodeURIComponent(whatsappMsgText)}`;
       
       card.innerHTML = `
