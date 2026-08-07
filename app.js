@@ -5,6 +5,9 @@ let state = {
   masterName: '',
   students: [],
   payments: [],
+  attendance: [],    // [{ date:'YYYY-MM-DD', studentId, status:'present'|'absent' }]
+  holidays: [],      // ['YYYY-MM-DD', ...]
+  autoSunday: false, // auto-mark every Sunday as holiday
   batchPricing: {
     "Kids batch (batch 1)": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 },
     "Intermediate (batch 2)": { "1m": 2000, "3m": 5500, "6m": 10000, "12m": 19000 },
@@ -49,12 +52,9 @@ let pendingFilterMode = 'current';
 
 // ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', () => {
-  // Force reset document and body scroll positions to combat mobile browser reload shifts
   window.scrollTo(0, 0);
   document.body.scrollTop = 0;
-  if (document.documentElement) {
-    document.documentElement.scrollTop = 0;
-  }
+  if (document.documentElement) document.documentElement.scrollTop = 0;
   
   initApp();
   registerServiceWorker();
@@ -62,7 +62,9 @@ document.addEventListener('DOMContentLoaded', () => {
   initFormsAndModals();
   initDataAdministration();
   initPullToRefresh();
-  initDashboardToggle(); // Wire up dashboard toggles
+  initDashboardToggle();
+  initAttendance();
+  initHolidaySettings();
 });
 
 // Initialize Dashboard Outstanding Toggle Pills
@@ -93,15 +95,14 @@ function initApp() {
   if (storedData) {
     try {
       state = JSON.parse(storedData);
-      // Ensure arrays exist
+      // Ensure arrays and new fields exist
       state.students = state.students || [];
       state.payments = state.payments || [];
       state.masterName = state.masterName || '';
-      
-      // Fallback fallback upgrade if legacy local storage doesn't have batchPricing
-      if (!state.batchPricing) {
-        state.batchPricing = { ...DEFAULT_STATE.batchPricing };
-      }
+      state.attendance = state.attendance || [];
+      state.holidays = state.holidays || [];
+      state.autoSunday = state.autoSunday || false;
+      if (!state.batchPricing) state.batchPricing = { ...DEFAULT_STATE.batchPricing };
     } catch (e) {
       console.error('Error parsing stored database, resetting to default.', e);
       state = { ...DEFAULT_STATE };
@@ -360,16 +361,11 @@ function initViewRouting() {
 }
 
 function renderActiveView() {
-  // Show / Hide Floating Action Buttons programmatically based on active view
   const fabAddStudent = document.getElementById('fab-add-student');
   const fabLogPayment = document.getElementById('fab-log-payment');
   
-  if (fabAddStudent) {
-    fabAddStudent.style.display = (currentView === 'students') ? 'flex' : 'none';
-  }
-  if (fabLogPayment) {
-    fabLogPayment.style.display = (currentView === 'history') ? 'flex' : 'none';
-  }
+  if (fabAddStudent) fabAddStudent.style.display = (currentView === 'students') ? 'flex' : 'none';
+  if (fabLogPayment) fabLogPayment.style.display = (currentView === 'history') ? 'flex' : 'none';
 
   switch (currentView) {
     case 'dashboard':
@@ -378,12 +374,15 @@ function renderActiveView() {
     case 'students':
       renderStudents();
       break;
+    case 'attendance':
+      renderAttendance();
+      break;
     case 'history':
       renderHistory();
       break;
     case 'settings':
-      // Handled statically, just ensure fields are synced
       updateMasterGreeting();
+      renderHolidaysList();
       break;
   }
 }
@@ -843,11 +842,14 @@ function renderStudents() {
     
     const initials = student.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
     const isStudentActive = student.status === 'active';
+    const avatarContent = student.photo
+      ? `<img src="${student.photo}" alt="${student.name}" style="width:100%; height:100%; object-fit:cover; border-radius:50%;">`
+      : `<span class="student-avatar-letter">${initials}</span>`;
     
     card.innerHTML = `
       <div class="student-card-left">
         <div class="student-avatar ${isStudentActive ? 'active-student' : ''}">
-          <span class="student-avatar-letter">${initials}</span>
+          ${avatarContent}
           ${isStudentActive ? `<div class="status-dot ${statusDotClass}"></div>` : ''}
         </div>
         <div class="student-card-details">
@@ -899,7 +901,14 @@ function showStudentDetails(studentId) {
   
   // Init details
   const initials = student.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-  document.getElementById('detail-avatar-letter').textContent = initials;
+  const profileAvatar = document.querySelector('.profile-avatar');
+  if (profileAvatar) {
+    if (student.photo) {
+      profileAvatar.innerHTML = `<img src="${student.photo}" alt="${student.name}" style="width:100%; height:100%; object-fit:cover; border-radius:50%;">`;
+    } else {
+      profileAvatar.innerHTML = `<span id="detail-avatar-letter">${initials}</span>`;
+    }
+  }
   document.getElementById('detail-student-name').textContent = student.name;
   document.getElementById('detail-student-batch').textContent = student.batch || 'General Batch';
   document.getElementById('detail-student-phone').textContent = student.phone;
@@ -992,6 +1001,55 @@ function showStudentDetails(studentId) {
       `;
       historyList.appendChild(row);
     });
+  }
+
+  // Load Attendance Record for this specific student
+  const studentAtt = (state.attendance || [])
+    .filter(a => a.studentId === student.id)
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const attPresent = studentAtt.filter(a => a.status === 'present').length;
+  const attAbsent = studentAtt.filter(a => a.status === 'absent').length;
+  const attTotal = studentAtt.length;
+  const attRate = attTotal > 0 ? Math.round((attPresent / attTotal) * 100) : 0;
+
+  const presentEl = document.getElementById('detail-att-present');
+  const absentEl = document.getElementById('detail-att-absent');
+  const totalEl = document.getElementById('detail-att-total');
+  const rateEl = document.getElementById('detail-attendance-rate');
+  const logsEl = document.getElementById('detail-attendance-logs');
+
+  if (presentEl) presentEl.textContent = attPresent;
+  if (absentEl) absentEl.textContent = attAbsent;
+  if (totalEl) totalEl.textContent = attTotal;
+
+  if (rateEl) {
+    if (attTotal === 0) {
+      rateEl.textContent = 'No Class Data';
+      rateEl.className = 'badge badge-outline';
+    } else {
+      rateEl.textContent = `${attRate}% Attendance`;
+      rateEl.className = attRate >= 80 ? 'badge badge-success' : (attRate >= 50 ? 'badge badge-warning' : 'badge badge-danger');
+    }
+  }
+
+  if (logsEl) {
+    logsEl.innerHTML = '';
+    if (studentAtt.length === 0) {
+      logsEl.innerHTML = '<div style="color:var(--text-secondary); font-size:0.75rem;">No attendance logged for this student yet.</div>';
+    } else {
+      studentAtt.slice(0, 15).forEach(a => {
+        const dateStr = new Date(a.date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+        const isPres = a.status === 'present';
+        const item = document.createElement('div');
+        item.className = 'att-log-item';
+        item.innerHTML = `
+          <span>📅 ${dateStr}</span>
+          <span class="badge ${isPres ? 'badge-success' : 'badge-danger'}" style="font-size:0.68rem; padding: 2px 8px;">${isPres ? '✓ Present' : '✕ Absent'}</span>
+        `;
+        logsEl.appendChild(item);
+      });
+    }
   }
 }
 
@@ -1091,8 +1149,63 @@ function renderHistory() {
   });
 }
 
+// Profile Photo upload handlers
+function setPhotoPreview(photoBase64) {
+  const previewImg = document.getElementById('photo-preview-img');
+  const placeholderIcon = document.getElementById('photo-placeholder-icon');
+  const hiddenInput = document.getElementById('student-photo-base64');
+  const fileInput = document.getElementById('student-photo-input');
+
+  if (fileInput) fileInput.value = '';
+  if (hiddenInput) hiddenInput.value = photoBase64 || '';
+
+  if (photoBase64 && previewImg) {
+    previewImg.src = photoBase64;
+    previewImg.style.display = 'block';
+    if (placeholderIcon) placeholderIcon.style.display = 'none';
+  } else {
+    if (previewImg) {
+      previewImg.src = '';
+      previewImg.style.display = 'none';
+    }
+    if (placeholderIcon) placeholderIcon.style.display = 'block';
+  }
+}
+
+function handlePhotoInputChange(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function(evt) {
+    const img = new Image();
+    img.onload = function() {
+      const canvas = document.createElement('canvas');
+      const size = 180;
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+
+      const minDim = Math.min(img.width, img.height);
+      const sx = (img.width - minDim) / 2;
+      const sy = (img.height - minDim) / 2;
+
+      ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, size, size);
+      const base64Photo = canvas.toDataURL('image/jpeg', 0.85);
+      setPhotoPreview(base64Photo);
+    };
+    img.src = evt.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
 // ==================== FORMS AND MODALS MANAGEMENT ====================
 function initFormsAndModals() {
+  const photoInput = document.getElementById('student-photo-input');
+  if (photoInput) {
+    photoInput.addEventListener('change', handlePhotoInputChange);
+  }
+
   // Sync inputs
   const searchInput = document.getElementById('student-search-input');
   if (searchInput) searchInput.addEventListener('input', renderStudents);
@@ -1160,6 +1273,7 @@ function initFormsAndModals() {
       // Clear edit values
       document.getElementById('student-id-field').value = '';
       document.getElementById('student-form').reset();
+      setPhotoPreview('');
       
       // Clear legacy options from edit mode
       const batchSelect = document.getElementById('student-batch');
@@ -1224,6 +1338,7 @@ function initFormsAndModals() {
       const batch = document.getElementById('student-batch').value.trim();
       const monthlyFee = parseInt(document.getElementById('student-fee').value || 0);
       const admissionDate = document.getElementById('student-admission').value;
+      const photo = document.getElementById('student-photo-base64').value || '';
       
       if (!studentId) {
         // Create new student
@@ -1235,6 +1350,7 @@ function initFormsAndModals() {
           batch,
           monthlyFee,
           admissionDate,
+          photo,
           status: 'active'
         };
         state.students.push(newStudent);
@@ -1252,9 +1368,10 @@ function initFormsAndModals() {
             batch,
             monthlyFee,
             admissionDate,
+            photo,
             status
           };
-          showToast(`${name} profiles updated!`, 'success');
+          showToast(`${name} profile updated!`, 'success');
         }
       }
       
@@ -1376,6 +1493,7 @@ function initFormsAndModals() {
       // Show and populate status dropdown
       document.getElementById('status-group').style.display = 'block';
       document.getElementById('student-status').value = student.status || 'active';
+      setPhotoPreview(student.photo || '');
       
       document.getElementById('student-modal-title').textContent = 'EDIT STUDENT PROFILE';
       openModal('student-modal');
@@ -1667,3 +1785,327 @@ setTimeout(() => {
   if (pSelect) pSelect.addEventListener('change', updateCalculatedPaymentFields);
   if (pStart) pStart.addEventListener('change', updateCalculatedPaymentFields);
 }, 500);
+
+// ==================== ATTENDANCE MODULE ====================
+
+// Returns true if a given date string (YYYY-MM-DD) is a holiday
+function isHoliday(dateStr) {
+  const d = new Date(dateStr);
+  // Check auto-sunday
+  if (state.autoSunday && d.getDay() === 0) return true;
+  // Check manual holidays list
+  return (state.holidays || []).includes(dateStr);
+}
+
+// Returns last N class dates (non-holiday days), going backwards from a given date
+function getLastClassDates(fromDateStr, count) {
+  const dates = [];
+  const d = new Date(fromDateStr);
+  d.setHours(0, 0, 0, 0);
+  let safety = 0;
+  while (dates.length < count && safety < 120) {
+    const s = d.toISOString().split('T')[0];
+    if (!isHoliday(s)) dates.push(s);
+    d.setDate(d.getDate() - 1);
+    safety++;
+  }
+  return dates;
+}
+
+// Returns consecutive absent count for a student going backwards from today
+function getConsecutiveAbsences(studentId) {
+  const today = new Date().toISOString().split('T')[0];
+  const recentDates = getLastClassDates(today, 30);
+  let count = 0;
+  for (const date of recentDates) {
+    const record = (state.attendance || []).find(a => a.studentId === studentId && a.date === date);
+    if (!record) break;        // no record = not yet marked, stop counting
+    if (record.status === 'absent') {
+      count++;
+    } else {
+      break; // present found, streak ends
+    }
+  }
+  return count;
+}
+
+// Render Attendance View for selected date
+function renderAttendance() {
+  const datePicker = document.getElementById('attendance-date-picker');
+  if (!datePicker) return;
+
+  // Default to today if no date set
+  if (!datePicker.value) {
+    datePicker.value = new Date().toISOString().split('T')[0];
+  }
+
+  const selectedDate = datePicker.value;
+  const container = document.getElementById('attendance-list');
+  const summaryText = document.getElementById('att-summary-text');
+  const holidayBadge = document.getElementById('att-holiday-badge');
+  const searchInput = document.getElementById('attendance-search-input');
+  if (!container) return;
+
+  const searchVal = (searchInput ? searchInput.value : '').toLowerCase().trim();
+  const isHol = isHoliday(selectedDate);
+  const activeStudents = state.students.filter(s => s.status === 'active');
+
+  if (isHol) {
+    const dow = new Date(selectedDate).toLocaleDateString('en-IN', { weekday: 'long' });
+    container.innerHTML = `
+      <div class="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>
+        <p style="font-weight:700; color:var(--warning-gold); font-size:0.95rem;">${dow} is marked as a Studio Holiday!</p>
+        <span style="font-size:0.75rem; color:var(--text-secondary);">No class attendance required for this date.</span>
+      </div>
+    `;
+    if (summaryText) summaryText.textContent = 'Holiday — class suspended';
+    if (holidayBadge) holidayBadge.style.display = 'inline-flex';
+    return;
+  } else {
+    if (holidayBadge) holidayBadge.style.display = 'none';
+  }
+
+  // Build or reuse attendance map for this date
+  const attendanceMap = (container._attendanceMap && container._selectedDate === selectedDate)
+    ? container._attendanceMap
+    : {};
+
+  if (!container._selectedDate || container._selectedDate !== selectedDate) {
+    (state.attendance || []).forEach(a => {
+      if (a.date === selectedDate) attendanceMap[a.studentId] = a.status;
+    });
+  }
+
+  const presentCount = activeStudents.filter(s => attendanceMap[s.id] === 'present').length;
+  const absentCount = activeStudents.filter(s => attendanceMap[s.id] === 'absent').length;
+  const unmarkedCount = activeStudents.filter(s => !attendanceMap[s.id]).length;
+
+  // Filter list by search query
+  let filteredStudents = activeStudents;
+  if (searchVal) {
+    filteredStudents = activeStudents.filter(s => 
+      s.name.toLowerCase().includes(searchVal) ||
+      (s.batch && s.batch.toLowerCase().includes(searchVal)) ||
+      (s.phone && s.phone.includes(searchVal)) ||
+      (s.parentName && s.parentName.toLowerCase().includes(searchVal))
+    );
+  }
+
+  if (summaryText) {
+    summaryText.textContent = `${activeStudents.length} enrolled • ${presentCount} present • ${absentCount} absent${unmarkedCount > 0 ? ` • ${unmarkedCount} pending` : ''}`;
+  }
+
+  container.innerHTML = '';
+
+  if (filteredStudents.length === 0) {
+    container.innerHTML = `<div class="empty-state"><p>${searchVal ? 'No students match your search.' : 'No active students enrolled yet.'}</p></div>`;
+    return;
+  }
+
+  filteredStudents.sort((a, b) => a.name.localeCompare(b.name)).forEach(student => {
+    const status = attendanceMap[student.id]; // 'present', 'absent', or undefined
+    const isPresent = status === 'present';
+    const isAbsent = status === 'absent';
+    const streak = getConsecutiveAbsences(student.id);
+
+    const card = document.createElement('div');
+    card.className = `att-student-card ${isAbsent ? 'status-absent' : (isPresent ? 'status-present' : 'status-unmarked')} animated-fade-in`;
+    card.dataset.studentId = student.id;
+
+    const initials = student.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+    const avatarContent = student.photo
+      ? `<img src="${student.photo}" alt="${student.name}" style="width:100%; height:100%; object-fit:cover; border-radius:50%;">`
+      : `${initials}`;
+    
+    card.innerHTML = `
+      <div class="att-student-left">
+        <div class="att-avatar ${isAbsent ? 'absent' : (isPresent ? 'present' : 'unmarked')}">${avatarContent}</div>
+        <div class="att-student-info">
+          <div class="att-student-name">${student.name}</div>
+          <div class="att-student-meta">
+            <span>${student.batch || 'General Batch'}</span>
+            ${streak >= 2 ? `<span class="att-absence-badge">⚠️ ${streak} Absences</span>` : ''}
+          </div>
+        </div>
+      </div>
+      <div class="att-toggle-group">
+        <button class="att-toggle-btn ${isPresent ? 'btn-present-active' : ''}" data-sid="${student.id}" data-status="present">
+          ✓ P
+        </button>
+        <button class="att-toggle-btn ${isAbsent ? 'btn-absent-active' : ''}" data-sid="${student.id}" data-status="absent">
+          ✕ A
+        </button>
+      </div>
+    `;
+
+    // Toggle button click listeners
+    const presentBtn = card.querySelector('.att-toggle-btn[data-status="present"]');
+    const absentBtn = card.querySelector('.att-toggle-btn[data-status="absent"]');
+
+    if (presentBtn) {
+      presentBtn.addEventListener('click', () => {
+        attendanceMap[student.id] = 'present';
+        container._attendanceMap = attendanceMap;
+        container._selectedDate = selectedDate;
+        autoSaveStudentAttendance(selectedDate, student.id, 'present');
+        renderAttendance();
+      });
+    }
+
+    if (absentBtn) {
+      absentBtn.addEventListener('click', () => {
+        attendanceMap[student.id] = 'absent';
+        container._attendanceMap = attendanceMap;
+        container._selectedDate = selectedDate;
+        autoSaveStudentAttendance(selectedDate, student.id, 'absent');
+        renderAttendance();
+      });
+    }
+
+    container.appendChild(card);
+  });
+
+  container._attendanceMap = attendanceMap;
+  container._selectedDate = selectedDate;
+}
+
+// Auto-save individual student attendance record into global state
+function autoSaveStudentAttendance(selectedDate, studentId, status) {
+  state.attendance = (state.attendance || []).filter(a => !(a.date === selectedDate && a.studentId === studentId));
+  state.attendance.push({ date: selectedDate, studentId, status });
+  saveState();
+
+  if (status === 'absent') {
+    checkAndShowAbsenceAlerts();
+  }
+}
+
+// Check all active students for 2+ consecutive absences and show WhatsApp alert modal
+function checkAndShowAbsenceAlerts() {
+  const activeStudents = state.students.filter(s => s.status === 'active');
+  const alerts = [];
+
+  activeStudents.forEach(student => {
+    const consAbsences = getConsecutiveAbsences(student.id);
+    if (consAbsences >= 2) {
+      alerts.push({ student, count: consAbsences });
+    }
+  });
+
+  if (alerts.length === 0) return;
+
+  const list = document.getElementById('absence-alert-list');
+  list.innerHTML = '';
+
+  alerts.forEach(({ student, count }) => {
+    const msg = `Hi Sir/Madam, this is a message from Niki Dance Studio (NDS). We've noticed that *${student.name}* has been absent for *${count} consecutive classes*. We miss them! Please send them to class or let us know if everything is okay. Thank you! 🙏`;
+    const waUrl = `https://api.whatsapp.com/send?phone=91${student.phone.trim()}&text=${encodeURIComponent(msg)}`;
+
+    const item = document.createElement('div');
+    item.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; background:rgba(227,28,37,0.08); border-radius:12px; border:1px solid rgba(227,28,37,0.2);';
+    item.innerHTML = `
+      <div>
+        <div style="font-weight:700; font-size:0.85rem;">${student.name}</div>
+        <div style="font-size:0.72rem; color:var(--brand-red);">Absent ${count} class${count > 1 ? 'es' : ''} in a row</div>
+        <div style="font-size:0.68rem; color:var(--text-secondary);">${student.batch || 'General Batch'}</div>
+      </div>
+      <a href="${waUrl}" target="_blank" class="action-btn-circle whatsapp" title="Send WhatsApp reminder" style="flex-shrink:0;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+      </a>
+    `;
+    list.appendChild(item);
+  });
+
+  openModal('absence-alert-modal');
+}
+
+// Initialize attendance tab event listeners
+function initAttendance() {
+  const datePicker = document.getElementById('attendance-date-picker');
+  const searchInput = document.getElementById('attendance-search-input');
+
+  if (datePicker) {
+    datePicker.value = new Date().toISOString().split('T')[0];
+    datePicker.addEventListener('change', () => {
+      const container = document.getElementById('attendance-list');
+      if (container) {
+        delete container._attendanceMap;
+        delete container._selectedDate;
+      }
+      renderAttendance();
+    });
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener('input', renderAttendance);
+  }
+}
+
+// ==================== HOLIDAY SETTINGS MODULE ====================
+
+function renderHolidaysList() {
+  const list = document.getElementById('holidays-list');
+  const autoCheck = document.getElementById('setting-auto-sunday');
+  if (!list) return;
+
+  if (autoCheck) autoCheck.checked = state.autoSunday || false;
+
+  const holidays = (state.holidays || []).sort();
+  list.innerHTML = '';
+
+  if (holidays.length === 0) {
+    list.innerHTML = '<p style="font-size:0.78rem; color:var(--text-secondary);">No custom holidays added yet.</p>';
+    return;
+  }
+
+  holidays.forEach(dateStr => {
+    const label = new Date(dateStr).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const chip = document.createElement('div');
+    chip.className = 'holiday-chip';
+    chip.innerHTML = `
+      <span>📅 ${label}</span>
+      <button class="holiday-chip-remove" onclick="removeHoliday('${dateStr}')" title="Remove Holiday">✕</button>
+    `;
+    list.appendChild(chip);
+  });
+}
+
+function initHolidaySettings() {
+  const addBtn = document.getElementById('btn-add-holiday');
+  const autoCheck = document.getElementById('setting-auto-sunday');
+
+  if (addBtn) {
+    addBtn.addEventListener('click', () => {
+      const input = document.getElementById('holiday-date-input');
+      if (!input || !input.value) { showToast('Please pick a date', 'warning'); return; }
+      const dateStr = input.value;
+      if (!(state.holidays || []).includes(dateStr)) {
+        state.holidays = state.holidays || [];
+        state.holidays.push(dateStr);
+        saveState();
+        showToast('Holiday added!', 'success');
+      } else {
+        showToast('Already marked as holiday', 'warning');
+      }
+      input.value = '';
+      renderHolidaysList();
+    });
+  }
+
+  if (autoCheck) {
+    autoCheck.addEventListener('change', () => {
+      state.autoSunday = autoCheck.checked;
+      saveState();
+      showToast(state.autoSunday ? 'Sundays auto-marked as holidays' : 'Sunday auto-holiday removed', 'success');
+    });
+  }
+}
+
+window.removeHoliday = function(dateStr) {
+  state.holidays = (state.holidays || []).filter(d => d !== dateStr);
+  saveState();
+  renderHolidaysList();
+  showToast('Holiday removed', 'success');
+};
+
