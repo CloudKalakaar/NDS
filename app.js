@@ -1176,10 +1176,10 @@ function handlePhotoInputChange(e) {
   const file = e.target.files && e.target.files[0];
   if (!file) return;
 
-  const reader = new FileReader();
-  reader.onload = function(evt) {
-    const img = new Image();
-    img.onload = function() {
+  const objectUrl = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = function() {
+    try {
       const canvas = document.createElement('canvas');
       const size = 180;
       canvas.width = size;
@@ -1193,10 +1193,17 @@ function handlePhotoInputChange(e) {
       ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, size, size);
       const base64Photo = canvas.toDataURL('image/jpeg', 0.85);
       setPhotoPreview(base64Photo);
-    };
-    img.src = evt.target.result;
+    } catch (err) {
+      console.error('Error processing photo:', err);
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
   };
-  reader.readAsDataURL(file);
+  img.onerror = function() {
+    URL.revokeObjectURL(objectUrl);
+    showToast('Failed to load image file', 'danger');
+  };
+  img.src = objectUrl;
 }
 
 // ==================== FORMS AND MODALS MANAGEMENT ====================
@@ -1867,15 +1874,14 @@ function renderAttendance() {
   }
 
   // Build or reuse attendance map for this date
-  const attendanceMap = (container._attendanceMap && container._selectedDate === selectedDate)
-    ? container._attendanceMap
-    : {};
-
-  if (!container._selectedDate || container._selectedDate !== selectedDate) {
+  if (!container._attendanceMap || container._selectedDate !== selectedDate) {
+    container._attendanceMap = {};
     (state.attendance || []).forEach(a => {
-      if (a.date === selectedDate) attendanceMap[a.studentId] = a.status;
+      if (a.date === selectedDate) container._attendanceMap[a.studentId] = a.status;
     });
+    container._selectedDate = selectedDate;
   }
+  const attendanceMap = container._attendanceMap;
 
   const presentCount = activeStudents.filter(s => attendanceMap[s.id] === 'present').length;
   const absentCount = activeStudents.filter(s => attendanceMap[s.id] === 'absent').length;
@@ -2026,15 +2032,19 @@ function initAttendance() {
   const searchInput = document.getElementById('attendance-search-input');
 
   if (datePicker) {
-    datePicker.value = new Date().toISOString().split('T')[0];
-    datePicker.addEventListener('change', () => {
+    if (!datePicker.value) {
+      datePicker.value = new Date().toISOString().split('T')[0];
+    }
+    const updateDateAndRender = () => {
       const container = document.getElementById('attendance-list');
       if (container) {
         delete container._attendanceMap;
         delete container._selectedDate;
       }
       renderAttendance();
-    });
+    };
+    datePicker.addEventListener('change', updateDateAndRender);
+    datePicker.addEventListener('input', updateDateAndRender);
   }
 
   if (searchInput) {

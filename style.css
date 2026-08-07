@@ -1673,6 +1673,20 @@ select:focus {
   padding: 10px 12px;
   font-size: 0.88rem;
   font-weight: 600;
+  color-scheme: dark !important;
+  background-color: rgba(20, 24, 33, 0.9) !important;
+  color: var(--brand-white) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 10px !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  min-height: 42px;
+}
+
+.att-date-input::-webkit-calendar-picker-indicator {
+  filter: invert(1) hue-rotate(180deg) !important;
+  cursor: pointer;
+  opacity: 0.8;
 }
 
 .att-actions {
