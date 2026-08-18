@@ -14,6 +14,15 @@ let state = {
     "Advanced batch (batch 3)": { "1m": 2500, "3m": 7000, "6m": 13000, "12m": 25000 },
     "Gymnastics batch": { "1m": 1800, "3m": 5000, "6m": 9000, "12m": 17000 },
     "Zumba batch": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 }
+  },
+  gdrive: {
+    clientId: '434441892966-203633m5fa73di5u7al48o4niilu1obh.apps.googleusercontent.com',
+    autoSync: false,
+    accessToken: '',
+    tokenExpiry: 0,
+    lastSyncTime: null,
+    fileId: null,
+    userEmail: ''
   }
 };
 
@@ -22,12 +31,24 @@ const DEFAULT_STATE = {
   masterName: '',
   students: [],
   payments: [],
+  attendance: [],
+  holidays: [],
+  autoSunday: false,
   batchPricing: {
     "Kids batch (batch 1)": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 },
     "Intermediate (batch 2)": { "1m": 2000, "3m": 5500, "6m": 10000, "12m": 19000 },
     "Advanced batch (batch 3)": { "1m": 2500, "3m": 7000, "6m": 13000, "12m": 25000 },
     "Gymnastics batch": { "1m": 1800, "3m": 5000, "6m": 9000, "12m": 17000 },
     "Zumba batch": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 }
+  },
+  gdrive: {
+    clientId: '434441892966-203633m5fa73di5u7al48o4niilu1obh.apps.googleusercontent.com',
+    autoSync: false,
+    accessToken: '',
+    tokenExpiry: 0,
+    lastSyncTime: null,
+    fileId: null,
+    userEmail: ''
   }
 };
 
@@ -61,6 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initViewRouting();
   initFormsAndModals();
   initDataAdministration();
+  initGoogleDrive();
   initPullToRefresh();
   initDashboardToggle();
   initAttendance();
@@ -103,6 +125,8 @@ function initApp() {
       state.holidays = state.holidays || [];
       state.autoSunday = state.autoSunday || false;
       if (!state.batchPricing) state.batchPricing = { ...DEFAULT_STATE.batchPricing };
+      if (!state.gdrive) state.gdrive = { ...DEFAULT_STATE.gdrive };
+      if (!state.gdrive.clientId) state.gdrive.clientId = DEFAULT_STATE.gdrive.clientId;
     } catch (e) {
       console.error('Error parsing stored database, resetting to default.', e);
       state = { ...DEFAULT_STATE };
@@ -117,7 +141,8 @@ function initApp() {
           masterName: legacyState.masterName || '',
           students: legacyState.students || [],
           payments: legacyState.payments || [],
-          batchPricing: { ...DEFAULT_STATE.batchPricing }
+          batchPricing: { ...DEFAULT_STATE.batchPricing },
+          gdrive: { ...DEFAULT_STATE.gdrive }
         };
         saveState();
         // Clear old key
@@ -154,9 +179,10 @@ function initApp() {
   initSettingsPricingSelector();
 }
 
-// Save DB State to LocalStorage
+// Save DB State to LocalStorage & trigger debounced auto-sync
 function saveState() {
   localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
+  triggerAutoSyncGoogleDrive();
 }
 
 // Update Master Name in Header and Settings
@@ -545,7 +571,65 @@ function renderDashboard() {
   
   document.getElementById('progress-percent').textContent = `${collectionRate}%`;
   document.getElementById('progress-bar-fill').style.width = `${collectionRate}%`;
-  
+
+  // Render Consecutive Absence Alerts on Dashboard
+  const absenceSection = document.getElementById('dashboard-absence-section');
+  const absenceList = document.getElementById('dashboard-absence-list');
+  const absenceCountBadge = document.getElementById('dashboard-absence-count-badge');
+
+  const absentStudentsWithAlerts = [];
+  activeStudents.forEach(student => {
+    const consCount = getConsecutiveAbsences(student.id);
+    if (consCount >= 2) {
+      absentStudentsWithAlerts.push({ student, count: consCount });
+    }
+  });
+
+  if (absenceSection && absenceList) {
+    if (absentStudentsWithAlerts.length === 0) {
+      absenceSection.style.display = 'none';
+      absenceList.innerHTML = '';
+    } else {
+      absenceSection.style.display = 'block';
+      if (absenceCountBadge) absenceCountBadge.textContent = absentStudentsWithAlerts.length;
+      absenceList.innerHTML = '';
+
+      absentStudentsWithAlerts.forEach(({ student, count }) => {
+        let cleanPhone = (student.phone || '').replace(/[^0-9]/g, '');
+        if (cleanPhone.length === 10) cleanPhone = '91' + cleanPhone;
+
+        const msg = `Hi Sir/Madam, this is a friendly message from Niki Dance Studio (NDS). We noticed that *${student.name}* has not attended classes for *${count} consecutive days*. We miss them in class! Please send them or let us know if everything is okay. Thank you! 🙏`;
+        const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`;
+
+        const initials = student.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+        const avatarContent = student.photo
+          ? `<img src="${student.photo}" style="width:40px; height:40px; border-radius:50%; object-fit:cover; flex-shrink:0;">`
+          : `<div style="width:40px; height:40px; border-radius:50%; background:rgba(227,28,37,0.15); border:1.5px solid var(--brand-red); display:flex; align-items:center; justify-content:center; font-size:0.85rem; font-weight:700; color:var(--brand-red); flex-shrink:0;">${initials}</div>`;
+
+        const card = document.createElement('div');
+        card.className = 'pending-card glass-card animated-fade-in due-card-warning';
+        card.style.borderLeftColor = 'var(--brand-red)';
+        card.innerHTML = `
+          <div style="display:flex; align-items:center; gap:12px; flex:1; min-width:0;">
+            ${avatarContent}
+            <div style="display:flex; flex-direction:column; gap:2px; min-width:0;">
+              <span style="font-weight:700; color:var(--brand-white); font-size:0.92rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${student.name}</span>
+              <span style="font-size:0.75rem; color:var(--brand-red); font-weight:600;">⚠️ Absent for ${count} consecutive classes</span>
+              <span style="font-size:0.7rem; color:var(--text-secondary);">${student.batch || 'General Batch'} • Ph: ${student.phone}</span>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <a href="${waUrl}" target="_blank" class="btn btn-primary btn-sm btn-glow" style="background:#25D366; border-color:#25D366; color:#fff; display:inline-flex; align-items:center; gap:6px; padding:7px 14px; font-size:0.78rem; font-weight:700; text-decoration:none;" title="Send WhatsApp alert">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+              Notify Parent
+            </a>
+          </div>
+        `;
+        absenceList.appendChild(card);
+      });
+    }
+  }
+
   // Render Pending List Block
   const pendingListContainer = document.getElementById('pending-students-list');
   pendingListContainer.innerHTML = '';
@@ -1819,14 +1903,14 @@ function getLastClassDates(fromDateStr, count) {
   return dates;
 }
 
-// Returns consecutive absent count for a student going backwards from today
+// Returns consecutive absent count for a student based on actual logged class history
 function getConsecutiveAbsences(studentId) {
-  const today = new Date().toISOString().split('T')[0];
-  const recentDates = getLastClassDates(today, 30);
+  const studentRecords = (state.attendance || [])
+    .filter(a => a.studentId === studentId && a.status)
+    .sort((a, b) => b.date.localeCompare(a.date));
+
   let count = 0;
-  for (const date of recentDates) {
-    const record = (state.attendance || []).find(a => a.studentId === studentId && a.date === date);
-    if (!record) break;        // no record = not yet marked, stop counting
+  for (const record of studentRecords) {
     if (record.status === 'absent') {
       count++;
     } else {
@@ -1983,41 +2067,64 @@ function autoSaveStudentAttendance(selectedDate, studentId, status) {
   saveState();
 
   if (status === 'absent') {
-    checkAndShowAbsenceAlerts();
+    const consAbsences = getConsecutiveAbsences(studentId);
+    if (consAbsences >= 2) {
+      const student = state.students.find(s => s.id === studentId);
+      if (student) {
+        checkAndShowAbsenceAlerts(student, consAbsences);
+      }
+    }
   }
 }
 
 // Check all active students for 2+ consecutive absences and show WhatsApp alert modal
-function checkAndShowAbsenceAlerts() {
+function checkAndShowAbsenceAlerts(targetStudent = null, streakCount = 0) {
   const activeStudents = state.students.filter(s => s.status === 'active');
-  const alerts = [];
+  let alerts = [];
 
-  activeStudents.forEach(student => {
-    const consAbsences = getConsecutiveAbsences(student.id);
-    if (consAbsences >= 2) {
-      alerts.push({ student, count: consAbsences });
-    }
-  });
+  if (targetStudent && streakCount >= 2) {
+    alerts = [{ student: targetStudent, count: streakCount }];
+  } else {
+    activeStudents.forEach(student => {
+      const count = getConsecutiveAbsences(student.id);
+      if (count >= 2) {
+        alerts.push({ student, count });
+      }
+    });
+  }
 
   if (alerts.length === 0) return;
 
   const list = document.getElementById('absence-alert-list');
+  if (!list) return;
   list.innerHTML = '';
 
   alerts.forEach(({ student, count }) => {
-    const msg = `Hi Sir/Madam, this is a message from Niki Dance Studio (NDS). We've noticed that *${student.name}* has been absent for *${count} consecutive classes*. We miss them! Please send them to class or let us know if everything is okay. Thank you! 🙏`;
-    const waUrl = `https://api.whatsapp.com/send?phone=91${student.phone.trim()}&text=${encodeURIComponent(msg)}`;
+    let cleanPhone = (student.phone || '').replace(/[^0-9]/g, '');
+    if (cleanPhone.length === 10) cleanPhone = '91' + cleanPhone;
+
+    const msg = `Hi Sir/Madam, this is a friendly message from Niki Dance Studio (NDS). We noticed that *${student.name}* has not attended classes for *${count} consecutive days*. We miss them in class! Please send them or let us know if everything is okay. Thank you! 🙏`;
+    const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`;
+
+    const initials = student.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+    const avatarContent = student.photo
+      ? `<img src="${student.photo}" style="width:38px; height:38px; border-radius:50%; object-fit:cover; flex-shrink:0;">`
+      : `<div style="width:38px; height:38px; border-radius:50%; background:rgba(227,28,37,0.15); border:1px solid var(--brand-red); display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:700; color:var(--brand-red); flex-shrink:0;">${initials}</div>`;
 
     const item = document.createElement('div');
-    item.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; background:rgba(227,28,37,0.08); border-radius:12px; border:1px solid rgba(227,28,37,0.2);';
+    item.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; background:rgba(227,28,37,0.08); border-radius:12px; border:1px solid rgba(227,28,37,0.25);';
     item.innerHTML = `
-      <div>
-        <div style="font-weight:700; font-size:0.85rem;">${student.name}</div>
-        <div style="font-size:0.72rem; color:var(--brand-red);">Absent ${count} class${count > 1 ? 'es' : ''} in a row</div>
-        <div style="font-size:0.68rem; color:var(--text-secondary);">${student.batch || 'General Batch'}</div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        ${avatarContent}
+        <div>
+          <div style="font-weight:700; font-size:0.85rem; color:var(--brand-white);">${student.name}</div>
+          <div style="font-size:0.72rem; color:var(--brand-red); font-weight:600;">Absent ${count} class${count > 1 ? 'es' : ''} in a row</div>
+          <div style="font-size:0.68rem; color:var(--text-secondary);">${student.batch || 'General Batch'} • ${student.phone}</div>
+        </div>
       </div>
-      <a href="${waUrl}" target="_blank" class="action-btn-circle whatsapp" title="Send WhatsApp reminder" style="flex-shrink:0;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+      <a href="${waUrl}" target="_blank" class="btn btn-primary btn-sm btn-glow" style="background:#25D366; border-color:#25D366; color:#fff; display:inline-flex; align-items:center; gap:5px; padding:6px 12px; font-size:0.75rem; flex-shrink:0;" title="Send WhatsApp message to parent">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+        WhatsApp
       </a>
     `;
     list.appendChild(item);
@@ -2118,4 +2225,410 @@ window.removeHoliday = function(dateStr) {
   renderHolidaysList();
   showToast('Holiday removed', 'success');
 };
+
+// ==================== GOOGLE DRIVE CLOUD BACKUP MODULE ====================
+
+const DEFAULT_GDRIVE_CLIENT_ID = '434441892966-203633m5fa73di5u7al48o4niilu1obh.apps.googleusercontent.com';
+const GDRIVE_BACKUP_FILENAME = 'NDS_Database_Backup.json';
+let gdriveTokenClient = null;
+let autoSyncTimeout = null;
+
+// Initialize Google Drive UI and events
+function initGoogleDrive() {
+  if (!state.gdrive) {
+    state.gdrive = {
+      clientId: DEFAULT_GDRIVE_CLIENT_ID,
+      autoSync: false,
+      accessToken: '',
+      tokenExpiry: 0,
+      lastSyncTime: null,
+      fileId: null,
+      userEmail: ''
+    };
+  } else if (!state.gdrive.clientId) {
+    state.gdrive.clientId = DEFAULT_GDRIVE_CLIENT_ID;
+  }
+
+  const autoSyncToggle = document.getElementById('gdrive-auto-sync-toggle');
+  const connectBtn = document.getElementById('btn-gdrive-connect');
+  const disconnectBtn = document.getElementById('btn-gdrive-disconnect');
+  const backupNowBtn = document.getElementById('btn-gdrive-backup-now');
+  const restoreNowBtn = document.getElementById('btn-gdrive-restore-now');
+
+  if (autoSyncToggle) {
+    autoSyncToggle.checked = !!state.gdrive.autoSync;
+    autoSyncToggle.addEventListener('change', () => {
+      state.gdrive.autoSync = autoSyncToggle.checked;
+      saveState();
+      if (state.gdrive.autoSync) {
+        showToast('Auto-backup to Google Drive enabled', 'success');
+        if (isGoogleDriveConnected()) {
+          uploadToGoogleDrive(false);
+        } else {
+          showToast('Connect Google Drive to start syncing', 'warning');
+        }
+      } else {
+        showToast('Auto-backup disabled', 'info');
+      }
+    });
+  }
+
+  if (connectBtn) {
+    connectBtn.addEventListener('click', () => connectGoogleDrive(true));
+  }
+
+  if (disconnectBtn) {
+    disconnectBtn.addEventListener('click', disconnectGoogleDrive);
+  }
+
+  if (backupNowBtn) {
+    backupNowBtn.addEventListener('click', () => uploadToGoogleDrive(true));
+  }
+
+  if (restoreNowBtn) {
+    restoreNowBtn.addEventListener('click', restoreFromGoogleDrive);
+  }
+
+  updateGoogleDriveUI();
+}
+
+function isGoogleDriveConnected() {
+  return !!(state.gdrive && state.gdrive.accessToken && state.gdrive.tokenExpiry > Date.now());
+}
+
+function updateGoogleDriveUI() {
+  const statusBadge = document.getElementById('gdrive-status-badge');
+  const connectBtn = document.getElementById('btn-gdrive-connect');
+  const connectedDetails = document.getElementById('gdrive-connected-details');
+  const actionsRow = document.getElementById('gdrive-actions-row');
+  const accountEmail = document.getElementById('gdrive-account-email');
+  const lastSyncText = document.getElementById('gdrive-last-sync-text');
+  const autoSyncToggle = document.getElementById('gdrive-auto-sync-toggle');
+
+  const connected = isGoogleDriveConnected();
+
+  if (statusBadge) {
+    if (connected) {
+      statusBadge.textContent = 'Connected';
+      statusBadge.className = 'badge badge-success';
+    } else {
+      statusBadge.textContent = 'Disconnected';
+      statusBadge.className = 'badge badge-outline';
+    }
+  }
+
+  if (connectBtn) {
+    connectBtn.style.display = connected ? 'none' : 'flex';
+  }
+
+  if (connectedDetails) {
+    connectedDetails.style.display = connected ? 'block' : 'none';
+  }
+
+  if (actionsRow) {
+    actionsRow.style.display = connected ? 'flex' : 'none';
+  }
+
+  if (accountEmail && state.gdrive) {
+    accountEmail.textContent = state.gdrive.userEmail || 'Google Account';
+  }
+
+  if (lastSyncText && state.gdrive) {
+    if (state.gdrive.lastSyncTime) {
+      const syncDate = new Date(state.gdrive.lastSyncTime);
+      lastSyncText.textContent = syncDate.toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } else {
+      lastSyncText.textContent = 'Never';
+    }
+  }
+
+  if (autoSyncToggle && state.gdrive) {
+    autoSyncToggle.checked = !!state.gdrive.autoSync;
+  }
+}
+
+// Trigger Google OAuth 2.0 Token Flow via Google Identity Services
+function connectGoogleDrive(triggerInitialSync = true) {
+  const clientId = (state.gdrive && state.gdrive.clientId) || DEFAULT_GDRIVE_CLIENT_ID;
+
+  if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2) {
+    showToast('Google Identity Services loading. Please retry in a moment.', 'warning');
+    return;
+  }
+
+  try {
+    gdriveTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email',
+      callback: async (tokenResponse) => {
+        if (tokenResponse && tokenResponse.access_token) {
+          state.gdrive.accessToken = tokenResponse.access_token;
+          state.gdrive.tokenExpiry = Date.now() + (parseInt(tokenResponse.expires_in || 3600) - 60) * 1000;
+
+          // Fetch user profile email
+          try {
+            const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+              headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
+            });
+            if (userRes.ok) {
+              const userData = await userRes.json();
+              state.gdrive.userEmail = userData.email || '';
+            }
+          } catch (e) {
+            console.warn('Could not fetch user email', e);
+          }
+
+          saveState();
+          updateGoogleDriveUI();
+          showToast(`Connected to Google Drive (${state.gdrive.userEmail || 'Success'})!`, 'success');
+
+          // Immediately sync current existing data to Google Drive
+          if (triggerInitialSync) {
+            uploadToGoogleDrive(false);
+          }
+        } else {
+          showToast('Google authentication failed or cancelled', 'danger');
+        }
+      },
+      error_callback: (err) => {
+        console.error('Google OAuth error:', err);
+        showToast('Google authentication error: ' + (err.message || 'Please check Client ID'), 'danger');
+      }
+    });
+
+    gdriveTokenClient.requestAccessToken({ prompt: '' });
+  } catch (err) {
+    console.error('Failed to init Google OAuth token client', err);
+    showToast('OAuth initialization error. Please verify Client ID.', 'danger');
+  }
+}
+
+// Disconnect Google Drive
+function disconnectGoogleDrive() {
+  if (state.gdrive && state.gdrive.accessToken) {
+    try {
+      if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
+        google.accounts.oauth2.revoke(state.gdrive.accessToken);
+      }
+    } catch (e) {}
+  }
+
+  if (state.gdrive) {
+    state.gdrive.accessToken = '';
+    state.gdrive.tokenExpiry = 0;
+    state.gdrive.userEmail = '';
+  }
+
+  saveState();
+  updateGoogleDriveUI();
+  showToast('Disconnected from Google Drive', 'info');
+}
+
+// Upload current NDS state JSON into Google Drive
+async function uploadToGoogleDrive(isManual = false) {
+  if (!isGoogleDriveConnected()) {
+    if (isManual) {
+      connectGoogleDrive(true);
+    }
+    return;
+  }
+
+  const token = state.gdrive.accessToken;
+  const backupPayload = JSON.stringify(state, null, 2);
+
+  if (isManual) {
+    showToast('Uploading backup to Google Drive...', 'info');
+  }
+
+  try {
+    // 1. Search if NDS_Database_Backup.json already exists in user's Drive
+    let fileId = state.gdrive.fileId;
+    if (!fileId) {
+      const searchRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=name='${GDRIVE_BACKUP_FILENAME}' and trashed=false&fields=files(id,name)&spaces=drive`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (searchRes.ok) {
+        const searchData = await searchRes.json();
+        if (searchData.files && searchData.files.length > 0) {
+          fileId = searchData.files[0].id;
+          state.gdrive.fileId = fileId;
+        }
+      }
+    }
+
+    let uploadRes;
+    if (fileId) {
+      // Update existing file content
+      uploadRes = await fetch(
+        `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: backupPayload
+        }
+      );
+    } else {
+      // Create new backup file in Google Drive
+      const metadata = {
+        name: GDRIVE_BACKUP_FILENAME,
+        mimeType: 'application/json',
+        description: 'Niki Dance Studio Database Cloud Backup'
+      };
+
+      const boundary = '-------314159265358979323846';
+      const delimiter = "\r\n--" + boundary + "\r\n";
+      const closeDelim = "\r\n--" + boundary + "--";
+
+      const multipartRequestBody =
+        delimiter +
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+        JSON.stringify(metadata) +
+        delimiter +
+        'Content-Type: application/json\r\n\r\n' +
+        backupPayload +
+        closeDelim;
+
+      uploadRes = await fetch(
+        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/related; boundary=' + boundary
+          },
+          body: multipartRequestBody
+        }
+      );
+    }
+
+    if (uploadRes.ok) {
+      const data = await uploadRes.json();
+      state.gdrive.fileId = data.id || fileId;
+      state.gdrive.lastSyncTime = new Date().toISOString();
+      saveState();
+      updateGoogleDriveUI();
+
+      if (isManual) {
+        showToast('Google Drive backup saved successfully! ☁️', 'success');
+      }
+    } else if (uploadRes.status === 401) {
+      // Token expired, clear token and prompt reconnect
+      state.gdrive.accessToken = '';
+      state.gdrive.tokenExpiry = 0;
+      saveState();
+      updateGoogleDriveUI();
+      if (isManual) {
+        showToast('Google session expired. Reconnecting...', 'warning');
+        connectGoogleDrive(true);
+      }
+    } else {
+      const errText = await uploadRes.text();
+      console.error('Google Drive Upload Failed', errText);
+      if (isManual) showToast('Cloud upload failed. Please try again.', 'danger');
+    }
+  } catch (err) {
+    console.error('Google Drive sync error:', err);
+    if (isManual) showToast('Google Drive connection error', 'danger');
+  }
+}
+
+// Restore Database from Google Drive
+async function restoreFromGoogleDrive() {
+  if (!isGoogleDriveConnected()) {
+    connectGoogleDrive(false);
+    return;
+  }
+
+  const token = state.gdrive.accessToken;
+  showToast('Checking Google Drive for backups...', 'info');
+
+  try {
+    const searchRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=name='${GDRIVE_BACKUP_FILENAME}' and trashed=false&fields=files(id,name,modifiedTime)&spaces=drive`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    if (!searchRes.ok) {
+      showToast('Could not search Google Drive files', 'danger');
+      return;
+    }
+
+    const searchData = await searchRes.json();
+    if (!searchData.files || searchData.files.length === 0) {
+      showToast('No NDS backup file found on your Google Drive', 'warning');
+      return;
+    }
+
+    const file = searchData.files[0];
+    const fileRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    if (!fileRes.ok) {
+      showToast('Failed to download backup from Google Drive', 'danger');
+      return;
+    }
+
+    const backupData = await fileRes.json();
+    if (!backupData || !Array.isArray(backupData.students)) {
+      showToast('Invalid backup file format on Google Drive', 'danger');
+      return;
+    }
+
+    const modTime = file.modifiedTime ? new Date(file.modifiedTime).toLocaleString('en-IN') : 'Recent';
+    const confirmRestore = confirm(`Found cloud backup from ${modTime} with ${backupData.students.length} students. Restoring will merge/update your local database. Proceed?`);
+
+    if (confirmRestore) {
+      // Preserve current gdrive configuration
+      const currentGdrive = { ...state.gdrive };
+
+      state = {
+        masterName: backupData.masterName || state.masterName,
+        students: backupData.students || [],
+        payments: backupData.payments || [],
+        attendance: backupData.attendance || [],
+        holidays: backupData.holidays || [],
+        autoSunday: backupData.autoSunday || false,
+        batchPricing: backupData.batchPricing || state.batchPricing,
+        gdrive: currentGdrive
+      };
+
+      state.gdrive.lastSyncTime = new Date().toISOString();
+      state.gdrive.fileId = file.id;
+
+      saveState();
+      updateMasterGreeting();
+      renderActiveView();
+      updateGoogleDriveUI();
+
+      showToast('Database successfully restored from Google Drive! ☁️', 'success');
+    }
+  } catch (err) {
+    console.error('Google Drive Restore Error:', err);
+    showToast('Failed to restore from Google Drive: ' + err.message, 'danger');
+  }
+}
+
+// Debounced background auto-sync function
+function triggerAutoSyncGoogleDrive() {
+  if (!state.gdrive || !state.gdrive.autoSync || !isGoogleDriveConnected()) return;
+
+  if (autoSyncTimeout) clearTimeout(autoSyncTimeout);
+  autoSyncTimeout = setTimeout(() => {
+    uploadToGoogleDrive(false);
+  }, 2500); // 2.5s debounce
+}
+
 
