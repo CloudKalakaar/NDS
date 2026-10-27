@@ -1,9 +1,10 @@
-const CACHE_NAME = 'nds-tracker-v2';
+const CACHE_NAME = 'nds-tracker-v3';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
   './style.css',
   './app.js',
+  './html2pdf.bundle.min.js',
   './manifest.json',
   './logo.jpg',
   './icon-180-v2.png',

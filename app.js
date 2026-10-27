@@ -13,7 +13,8 @@ let state = {
     "Intermediate (batch 2)": { "1m": 2000, "3m": 5500, "6m": 10000, "12m": 19000 },
     "Advanced batch (batch 3)": { "1m": 2500, "3m": 7000, "6m": 13000, "12m": 25000 },
     "Gymnastics batch": { "1m": 1800, "3m": 5000, "6m": 9000, "12m": 17000 },
-    "Zumba batch": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 }
+    "Zumba batch": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 },
+    "Bharathanatyam batch": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 }
   },
   gdrive: {
     clientId: '434441892966-203633m5fa73di5u7al48o4niilu1obh.apps.googleusercontent.com',
@@ -39,7 +40,8 @@ const DEFAULT_STATE = {
     "Intermediate (batch 2)": { "1m": 2000, "3m": 5500, "6m": 10000, "12m": 19000 },
     "Advanced batch (batch 3)": { "1m": 2500, "3m": 7000, "6m": 13000, "12m": 25000 },
     "Gymnastics batch": { "1m": 1800, "3m": 5000, "6m": 9000, "12m": 17000 },
-    "Zumba batch": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 }
+    "Zumba batch": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 },
+    "Bharathanatyam batch": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 }
   },
   gdrive: {
     clientId: '434441892966-203633m5fa73di5u7al48o4niilu1obh.apps.googleusercontent.com',
@@ -125,6 +127,9 @@ function initApp() {
       state.holidays = state.holidays || [];
       state.autoSunday = state.autoSunday || false;
       if (!state.batchPricing) state.batchPricing = { ...DEFAULT_STATE.batchPricing };
+      if (!state.batchPricing["Bharathanatyam batch"]) {
+        state.batchPricing["Bharathanatyam batch"] = { ...DEFAULT_STATE.batchPricing["Bharathanatyam batch"] };
+      }
       if (!state.gdrive) state.gdrive = { ...DEFAULT_STATE.gdrive };
       if (!state.gdrive.clientId) state.gdrive.clientId = DEFAULT_STATE.gdrive.clientId;
     } catch (e) {
@@ -667,12 +672,14 @@ function renderDashboard() {
       const dueFormatted = new Date(memStatus.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
       const statusText = memStatus.status === 'unpaid' ? `Never paid (Admitted: ${dueFormatted})` : `Expired on: ${dueFormatted}`;
       
-      // FIX 3: Build full package price list for the student's batch
+      // Build package price list for the student's batch (3, 6, 12 months)
       const batch = student.batch || 'Kids batch (batch 1)';
       const pricing = state.batchPricing[batch] || { '1m': 1500, '3m': 4000, '6m': 7500, '12m': 14000 };
-      const packageList = `1 Month: ₹${pricing['1m']} | 3 Months: ₹${pricing['3m']} | 6 Months: ₹${pricing['6m']} | 12 Months: ₹${pricing['12m']}`;
+      const packageList = `3 Months: ₹${pricing['3m']} | 6 Months: ₹${pricing['6m']} | 12 Months: ₹${pricing['12m']}`;
       const whatsappMsgText = `Hi Sir/Madam, this is a friendly reminder from Niki Dance Studio (NDS) regarding ${student.name}'s fees. Validity ended on: ${dueFormatted}.\n\nFee Packages (${batch}):\n${packageList}\n\nKindly clear the pending fees. Thank you!`;
-      const whatsappUrl = `https://api.whatsapp.com/send?phone=91${student.phone.trim()}&text=${encodeURIComponent(whatsappMsgText)}`;
+      let cleanPhone = (student.phone || '').replace(/[^0-9]/g, '');
+      if (cleanPhone.length === 10) cleanPhone = '91' + cleanPhone;
+      const whatsappUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(whatsappMsgText)}`;
       
       card.innerHTML = `
         <div class="pending-info">
@@ -727,12 +734,14 @@ function renderDashboard() {
       const card = document.createElement('div');
       card.className = 'pending-card glass-card animated-fade-in due-card-warning';
       
-      // FIX 3: Full package price list in previous-months reminder too
+      // Build package price list for the student's batch (3, 6, 12 months)
       const batchPrev = student.batch || 'Kids batch (batch 1)';
       const pricingPrev = state.batchPricing[batchPrev] || { '1m': 1500, '3m': 4000, '6m': 7500, '12m': 14000 };
-      const packageListPrev = `1 Month: ₹${pricingPrev['1m']} | 3 Months: ₹${pricingPrev['3m']} | 6 Months: ₹${pricingPrev['6m']} | 12 Months: ₹${pricingPrev['12m']}`;
+      const packageListPrev = `3 Months: ₹${pricingPrev['3m']} | 6 Months: ₹${pricingPrev['6m']} | 12 Months: ₹${pricingPrev['12m']}`;
       const whatsappMsgText = `Hi Sir/Madam, this is a reminder from Niki Dance Studio (NDS) regarding ${student.name}'s fees. Overdue since: ${dueFormatted} (${memStatus.daysOverdue} days).\n\nFee Packages (${batchPrev}):\n${packageListPrev}\n\nKindly clear the pending dues. Thank you!`;
-      const whatsappUrl = `https://api.whatsapp.com/send?phone=91${student.phone.trim()}&text=${encodeURIComponent(whatsappMsgText)}`;
+      let cleanPhonePrev = (student.phone || '').replace(/[^0-9]/g, '');
+      if (cleanPhonePrev.length === 10) cleanPhonePrev = '91' + cleanPhonePrev;
+      const whatsappUrl = `https://api.whatsapp.com/send?phone=${cleanPhonePrev}&text=${encodeURIComponent(whatsappMsgText)}`;
       
       card.innerHTML = `
         <div class="pending-info">
@@ -945,9 +954,12 @@ function renderStudents() {
           <span class="student-subdetails">Ph: ${student.phone}</span>
         </div>
       </div>
-      <div class="student-card-right">
+      <div class="student-card-right" style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
         <span class="student-fee-val">₹${parseInt(student.monthlyFee || 0).toLocaleString('en-IN')}</span>
-        <span class="student-subdetails" style="font-size:0.6rem;">Monthly Fee</span>
+        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openStudentLatestInvoice('${student.id}')" title="Download Student Invoice PDF" style="padding: 2px 8px; font-size: 0.68rem; border-color: rgba(227,28,37,0.35); display: flex; align-items: center; gap: 4px; color: var(--brand-white);">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          PDF
+        </button>
       </div>
     `;
     gridContainer.appendChild(card);
@@ -1081,7 +1093,10 @@ function showStudentDetails(studentId) {
           <span style="font-weight:600;">${validityText}</span>
           <span style="font-size:0.7rem; color:var(--text-muted);">Receipt Date: ${payDate}</span>
         </div>
-        <span><strong>₹${parseInt(p.amount || 0).toLocaleString('en-IN')}</strong> (${p.method || 'Cash'})</span>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span><strong>₹${parseInt(p.amount || 0).toLocaleString('en-IN')}</strong> (${p.method || 'Cash'})</span>
+          <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openInvoiceForPayment('${p.id}')" title="Download Official PDF Invoice" style="padding: 3px 8px; font-size: 0.68rem; border-color: rgba(227,28,37,0.35); display: flex; align-items: center; gap: 4px; color: var(--brand-white);"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> PDF</button>
+        </div>
       `;
       historyList.appendChild(row);
     });
@@ -1224,9 +1239,12 @@ function renderHistory() {
         </span>
         ${p.remarks ? `<span class="history-mode" style="font-size:0.7rem; font-style:italic;">Note: ${p.remarks}</span>` : ''}
       </div>
-      <div class="history-right">
+      <div class="history-right" style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
         <span class="history-amount">+ ₹${parseInt(p.amount || 0).toLocaleString('en-IN')}</span>
-        <span class="badge badge-success history-month-tag">${packageLabel}</span>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span class="badge badge-success history-month-tag">${packageLabel}</span>
+          <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openInvoiceForPayment('${p.id}')" title="Download Official PDF Invoice" style="padding: 4px 10px; font-size: 0.72rem; border-color: rgba(227,28,37,0.35); display: flex; align-items: center; gap: 4px; color: var(--brand-white);"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Download PDF</button>
+        </div>
       </div>
     `;
     listContainer.appendChild(card);
@@ -1306,6 +1324,18 @@ function initFormsAndModals() {
   
   const statusFilter = document.getElementById('student-status-filter');
   if (statusFilter) statusFilter.addEventListener('change', renderStudents);
+
+  const studentBatchSelect = document.getElementById('student-batch');
+  if (studentBatchSelect) {
+    studentBatchSelect.addEventListener('change', () => {
+      const batch = studentBatchSelect.value;
+      const feeInput = document.getElementById('student-fee');
+      const studentId = document.getElementById('student-id-field').value;
+      if (!studentId && batch && state.batchPricing[batch] && feeInput) {
+        feeInput.value = state.batchPricing[batch]['1m'] || 1500;
+      }
+    });
+  }
   
   const histSearchInput = document.getElementById('history-search-input');
   if (histSearchInput) histSearchInput.addEventListener('input', renderHistory);
@@ -1446,6 +1476,16 @@ function initFormsAndModals() {
         };
         state.students.push(newStudent);
         showToast(`${name} admitted successfully!`, 'success');
+
+        saveState();
+        closeModal('student-modal');
+        renderActiveView();
+
+        // Automatically generate and present official admission invoice
+        setTimeout(() => {
+          openInvoiceForAdmission(newStudent.id);
+        }, 250);
+        return;
       } else {
         // Edit existing student
         const index = state.students.findIndex(s => s.id === studentId);
@@ -1507,6 +1547,16 @@ function initFormsAndModals() {
         state.payments.push(newPayment);
         
         showToast(`Fees receipt logged for ${studentName}!`, 'success');
+
+        saveState();
+        closeModal('payment-modal');
+        renderActiveView();
+
+        // Automatically generate and present fee payment invoice
+        setTimeout(() => {
+          openInvoiceForPayment(newPayment.id);
+        }, 250);
+        return;
       }
       
       saveState();
@@ -1560,7 +1610,8 @@ function initFormsAndModals() {
         "Intermediate (batch 2)",
         "Advanced batch (batch 3)",
         "Gymnastics batch",
-        "Zumba batch"
+        "Zumba batch",
+        "Bharathanatyam batch"
       ];
       
       // Clear previous custom options
@@ -2629,6 +2680,395 @@ function triggerAutoSyncGoogleDrive() {
   autoSyncTimeout = setTimeout(() => {
     uploadToGoogleDrive(false);
   }, 2500); // 2.5s debounce
+}
+
+// ==================== INVOICE & RECEIPT GENERATOR ====================
+let currentInvoiceData = null;
+
+function renderInvoiceModal(data) {
+  currentInvoiceData = data;
+  const printable = document.getElementById('invoice-printable');
+  const modalTitle = document.getElementById('invoice-modal-title');
+  const whatsappMsgInput = document.getElementById('invoice-whatsapp-msg');
+
+  if (modalTitle) modalTitle.textContent = data.title || 'FEE INVOICE & RECEIPT';
+  if (whatsappMsgInput) whatsappMsgInput.value = data.defaultMsg || '';
+
+  const masterName = state.masterName || 'Niki';
+  const student = data.student || {};
+
+  printable.innerHTML = `
+    <div class="inv-header">
+      <div class="inv-logo-box">
+        <div class="inv-logo-badge">
+          <span class="inv-logo-nds">NDS</span>
+        </div>
+        <div>
+          <h2 class="inv-studio-name">NIKI DANCE STUDIO</h2>
+          <span class="inv-studio-sub">Dance • Fitness • Passion</span>
+        </div>
+      </div>
+      <div class="inv-meta-box">
+        <span class="inv-type-badge">${data.typeBadge || 'OFFICIAL RECEIPT'}</span>
+        <span class="inv-no">#${data.invoiceNo}</span>
+        <span class="inv-date">Date: ${data.invoiceDate}</span>
+      </div>
+    </div>
+
+    <div class="inv-divider"></div>
+
+    <div class="inv-parties-grid">
+      <div class="inv-party-col">
+        <span class="inv-party-label">Billed To (Student / Parent)</span>
+        <span class="inv-party-name">${student.name || 'Student'}</span>
+        ${student.parentName ? `<span class="inv-party-line"><strong>Parent:</strong> ${student.parentName}</span>` : ''}
+        <span class="inv-party-line"><strong>Phone:</strong> ${student.phone || 'N/A'}</span>
+        <span class="inv-party-line"><strong>Batch:</strong> ${student.batch || 'General Batch'}</span>
+      </div>
+      <div class="inv-party-col" style="text-align: right; align-items: flex-end;">
+        <span class="inv-party-label">Issued By Studio</span>
+        <span class="inv-party-name">Niki Dance Studio (NDS)</span>
+        <span class="inv-party-line"><strong>Master:</strong> ${masterName}</span>
+        <span class="inv-party-line"><strong>Status:</strong> <span style="color:#059669; font-weight:700;">${data.statusLabel || 'PAID & CONFIRMED'}</span></span>
+        <span class="inv-party-line"><strong>Mode:</strong> ${data.method || 'Cash / UPI'}</span>
+      </div>
+    </div>
+
+    <table class="inv-table">
+      <thead>
+        <tr>
+          <th>Particulars / Description</th>
+          <th>Duration / Validity</th>
+          <th class="col-amount">Amount (₹)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <strong>${data.itemTitle}</strong>
+            <div style="font-size:0.75rem; color:#6b7280; margin-top:3px;">${data.itemSub}</div>
+          </td>
+          <td>${data.period}</td>
+          <td class="col-amount">₹${data.amount.toLocaleString('en-IN')}</td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr class="inv-table-total-row">
+          <td colspan="2" class="inv-total-label">Total Amount Paid:</td>
+          <td class="inv-total-amount">₹${data.amount.toLocaleString('en-IN')}</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <div class="inv-bottom-row">
+      <div class="inv-stamp">${data.stampText || '✓ PAYMENT VERIFIED'}</div>
+      <div class="inv-sign-block">
+        <div class="inv-sign-line"></div>
+        <span class="inv-sign-title">${masterName}</span>
+        <span class="inv-sign-sub">Authorized Signatory • NDS</span>
+      </div>
+    </div>
+
+    <div class="inv-thankyou-note">
+      Thank you for being part of Niki Dance Studio family! Keep dancing, keep shining. 💃🕺
+    </div>
+  `;
+
+  // Bind Action Buttons (both top bar and bottom footer)
+  const btnPrint = document.getElementById('btn-print-invoice');
+  const btnTopPrint = document.getElementById('btn-top-print-invoice');
+  if (btnPrint) btnPrint.onclick = () => printInvoice();
+  if (btnTopPrint) btnTopPrint.onclick = () => printInvoice();
+
+  const btnDownload = document.getElementById('btn-download-invoice-pdf');
+  const btnTopDownload = document.getElementById('btn-top-download-invoice-pdf');
+  if (btnDownload) {
+    btnDownload.onclick = () => downloadInvoicePDF(student.name, data.invoiceNo);
+  }
+  if (btnTopDownload) {
+    btnTopDownload.onclick = () => downloadInvoicePDF(student.name, data.invoiceNo);
+  }
+
+  const btnWhatsApp = document.getElementById('btn-send-invoice-whatsapp');
+  if (btnWhatsApp) {
+    btnWhatsApp.onclick = () => {
+      const msg = document.getElementById('invoice-whatsapp-msg').value;
+      sendInvoiceOnWhatsApp(student.phone, msg, student.name, data.invoiceNo);
+    };
+  }
+
+  openModal('invoice-modal');
+}
+
+window.openStudentLatestInvoice = function(studentId) {
+  const sid = studentId || selectedStudentId;
+  if (!sid) {
+    showToast('Please select a student first', 'warning');
+    return;
+  }
+  const student = state.students.find(s => s.id === sid);
+  if (!student) return;
+
+  // Check if student has recorded payments
+  const studentPayments = (state.payments || [])
+    .filter(p => p.studentId === student.id)
+    .sort((a, b) => new Date(b.datePaid) - new Date(a.datePaid));
+
+  if (studentPayments.length > 0) {
+    openInvoiceForPayment(studentPayments[0].id);
+  } else {
+    openInvoiceForAdmission(student.id);
+  }
+};
+
+window.openInvoiceForPayment = function(paymentId) {
+  const payment = state.payments.find(p => p.id === paymentId);
+  if (!payment) return;
+  const student = state.students.find(s => s.id === payment.studentId) || {
+    name: 'Student',
+    phone: '',
+    parentName: '',
+    batch: 'General Batch'
+  };
+
+  const invoiceNo = `NDS-INV-${new Date(payment.datePaid || Date.now()).getFullYear()}-${payment.id.replace('pay_', '').slice(-5)}`;
+  const invoiceDate = new Date(payment.datePaid || Date.now()).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+
+  let pkgLabel = '1 Month Package';
+  if (payment.package === '3m') pkgLabel = '3 Months Package';
+  else if (payment.package === '6m') pkgLabel = '6 Months Package';
+  else if (payment.package === '12m') pkgLabel = '12 Months Package (Annual)';
+  else if (payment.package === 'custom') pkgLabel = 'Custom Package';
+
+  let validityStr = '';
+  if (payment.startDate && payment.endDate) {
+    const sDate = new Date(payment.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    const eDate = new Date(payment.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    validityStr = `${sDate} to ${eDate}`;
+  } else {
+    validityStr = payment.monthPaidFor || 'Standard Term';
+  }
+
+  const defaultMsg = `Hi Sir/Madam, here is the official fee payment receipt for ${student.name} at Niki Dance Studio (NDS).\n\n📄 Invoice No: #${invoiceNo}\n🩰 Batch: ${student.batch || 'General Batch'}\n📅 Validity: ${validityStr}\n💳 Amount Paid: ₹${parseInt(payment.amount || 0).toLocaleString('en-IN')} (${payment.method || 'Cash'})\n\nThank you for choosing NDS! 💃`;
+
+  renderInvoiceModal({
+    type: 'payment',
+    title: 'FEE PAYMENT RECEIPT',
+    typeBadge: 'FEE RECEIPT',
+    invoiceNo,
+    invoiceDate,
+    student,
+    itemTitle: `${pkgLabel} - Dance Training`,
+    itemSub: `Dance Batch: ${student.batch || 'General Batch'}${payment.remarks ? ' • Remarks: ' + payment.remarks : ''}`,
+    period: validityStr,
+    method: payment.method || 'Cash',
+    amount: parseInt(payment.amount || 0),
+    statusLabel: 'PAID & CONFIRMED',
+    stampText: '✓ PAYMENT VERIFIED',
+    defaultMsg
+  });
+};
+
+window.openInvoiceForAdmission = function(studentId) {
+  const student = state.students.find(s => s.id === studentId);
+  if (!student) return;
+
+  const invoiceNo = `NDS-ADM-${new Date(student.admissionDate || Date.now()).getFullYear()}-${student.id.replace('std_', '').slice(-5)}`;
+  const invoiceDate = new Date(student.admissionDate || Date.now()).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+
+  const admDateFormatted = new Date(student.admissionDate || Date.now()).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+
+  const defaultMsg = `Dear Parent, welcome to Niki Dance Studio (NDS)! We are delighted to confirm ${student.name}'s admission for ${student.batch || 'General Batch'}.\n\n📄 Admission Receipt: #${invoiceNo}\n📅 Admission Date: ${admDateFormatted}\n💳 Monthly Class Fee: ₹${parseInt(student.monthlyFee || 0).toLocaleString('en-IN')}\n\nLet's dance and shine! 💃🕺`;
+
+  renderInvoiceModal({
+    type: 'admission',
+    title: 'STUDENT ADMISSION RECEIPT',
+    typeBadge: 'ADMISSION RECEIPT',
+    invoiceNo,
+    invoiceDate,
+    student,
+    itemTitle: `New Student Admission & Registration`,
+    itemSub: `Dance Batch: ${student.batch || 'General Batch'} • Status: Active Member`,
+    period: `Admitted: ${admDateFormatted}`,
+    method: 'Registration',
+    amount: parseInt(student.monthlyFee || 0),
+    statusLabel: 'ADMISSION CONFIRMED',
+    stampText: '✓ ADMISSION VERIFIED',
+    defaultMsg
+  });
+};
+
+function downloadInvoicePDF(studentName, invoiceNo) {
+  const invoiceElement = document.getElementById('invoice-printable');
+  if (!invoiceElement) {
+    showToast('Invoice preview not found', 'danger');
+    return;
+  }
+
+  showToast('Generating official PDF invoice...', 'info');
+  const cleanName = (studentName || 'Student').replace(/[^a-zA-Z0-9]/g, '_');
+  const filename = `NDS_Invoice_${cleanName}_${invoiceNo}.pdf`;
+
+  // Reset scroll on preview container so html2canvas starts from y=0
+  const scrollContainer = document.querySelector('.invoice-modal-scrollable');
+  if (scrollContainer) scrollContainer.scrollTop = 0;
+
+  if (typeof html2pdf !== 'undefined') {
+    try {
+      const opt = {
+        margin: [10, 10, 10, 10],
+        filename: filename,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          scrollY: 0,
+          scrollX: 0
+        },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+
+      html2pdf().set(opt).from(invoiceElement).save().then(() => {
+        showToast('PDF invoice downloaded successfully! 📄', 'success');
+      }).catch(err => {
+        console.error('PDF Generation Error:', err);
+        showToast('Direct download failed. Please use Print Invoice -> Save as PDF.', 'warning');
+      });
+      return;
+    } catch (e) {
+      console.error('html2pdf exception:', e);
+      showToast('PDF generation failed. Please use Print Invoice option.', 'danger');
+      return;
+    }
+  }
+
+  showToast('PDF engine not ready. Please use Print Invoice option.', 'warning');
+}
+
+function printInvoice() {
+  const printable = document.getElementById('invoice-printable');
+  if (!printable) return;
+
+  const printFrame = document.createElement('iframe');
+  printFrame.style.position = 'fixed';
+  printFrame.style.right = '0';
+  printFrame.style.bottom = '0';
+  printFrame.style.width = '0';
+  printFrame.style.height = '0';
+  printFrame.style.border = '0';
+  document.body.appendChild(printFrame);
+
+  const frameDoc = printFrame.contentWindow.document;
+  frameDoc.open();
+  frameDoc.write(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>NDS Invoice</title>
+      <style>
+        @page { size: A4 portrait; margin: 12mm 15mm; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111827; background: #fff; padding: 0; }
+        .inv-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+        .inv-logo-box { display: flex; align-items: center; gap: 14px; }
+        .inv-logo-badge { width: 48px; height: 48px; border-radius: 50%; background: #E31C25; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 1.15rem; letter-spacing: 1px; }
+        .inv-studio-name { font-weight: 800; font-size: 1.35rem; color: #111827; letter-spacing: 0.5px; margin: 0; }
+        .inv-studio-sub { font-size: 0.7rem; color: #E31C25; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-top: 3px; display: block; }
+        .inv-meta-box { text-align: right; display: flex; flex-direction: column; align-items: flex-end; }
+        .inv-type-badge { display: inline-block; background: #E31C25; color: #fff; font-weight: 800; font-size: 0.72rem; padding: 4px 10px; border-radius: 6px; letter-spacing: 0.8px; text-transform: uppercase; margin-bottom: 6px; }
+        .inv-no { font-weight: 700; font-size: 0.9rem; color: #374151; }
+        .inv-date { font-size: 0.8rem; color: #6b7280; margin-top: 2px; }
+        .inv-divider { height: 3px; background: #E31C25; margin-bottom: 20px; width: 100%; }
+        .inv-parties-grid { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 22px; background: #f9fafb; padding: 14px 18px; border-radius: 8px; border: 1px solid #f3f4f6; }
+        .inv-party-col { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+        .inv-party-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 2px; }
+        .inv-party-name { font-size: 1.05rem; font-weight: 700; color: #111827; }
+        .inv-party-line { font-size: 0.82rem; color: #4b5563; }
+        .inv-table { width: 100%; border-collapse: collapse; margin-bottom: 22px; font-size: 0.88rem; }
+        .inv-table th { background: #f3f4f6; color: #374151; font-weight: 700; text-align: left; padding: 10px 12px; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #e5e7eb; }
+        .inv-table td { padding: 12px; border-bottom: 1px solid #f3f4f6; color: #1f2937; }
+        .inv-table .col-amount { text-align: right; font-weight: 700; }
+        .inv-table-total-row td { border-bottom: none; border-top: 2px solid #e5e7eb; padding-top: 14px; }
+        .inv-total-label { text-align: right; font-weight: 700; font-size: 0.88rem; color: #374151; text-transform: uppercase; }
+        .inv-total-amount { text-align: right; font-weight: 800; font-size: 1.3rem; color: #E31C25; }
+        .inv-bottom-row { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 24px; padding-top: 18px; border-top: 1px dashed #d1d5db; }
+        .inv-stamp { border: 2px solid #10B981; color: #059669; font-weight: 800; font-size: 0.76rem; padding: 6px 14px; border-radius: 8px; letter-spacing: 1px; text-transform: uppercase; background: rgba(16, 185, 129, 0.08); display: inline-block; }
+        .inv-sign-block { text-align: right; display: flex; flex-direction: column; align-items: flex-end; }
+        .inv-sign-line { width: 150px; height: 1px; background: #9ca3af; margin-bottom: 6px; }
+        .inv-sign-title { font-size: 0.82rem; font-weight: 700; color: #1f2937; }
+        .inv-sign-sub { font-size: 0.7rem; color: #6b7280; }
+        .inv-thankyou-note { font-size: 0.78rem; text-align: center; color: #9ca3af; margin-top: 24px; font-style: italic; }
+      </style>
+    </head>
+    <body>
+      ${printable.innerHTML}
+    </body>
+    </html>
+  `);
+  frameDoc.close();
+  setTimeout(() => {
+    printFrame.contentWindow.focus();
+    printFrame.contentWindow.print();
+    setTimeout(() => { printFrame.remove(); }, 1500);
+  }, 250);
+}
+
+async function sendInvoiceOnWhatsApp(phone, customMsg, studentName, invoiceNo) {
+  let cleanPhone = (phone || '').replace(/[^0-9]/g, '');
+  if (cleanPhone.length === 10) cleanPhone = '91' + cleanPhone;
+
+  // 1. Trigger the direct PDF invoice download so the user has the official file ready
+  downloadInvoicePDF(studentName, invoiceNo);
+
+  // 2. On Mobile with Web Share API: If native file sharing is supported, share PDF file directly
+  const invoiceElement = document.getElementById('invoice-printable');
+  if (navigator.canShare && typeof html2pdf !== 'undefined' && invoiceElement) {
+    try {
+      const cleanName = (studentName || 'Student').replace(/[^a-zA-Z0-9]/g, '_');
+      const filename = `NDS_Invoice_${cleanName}_${invoiceNo}.pdf`;
+      const opt = {
+        margin: [10, 10, 10, 10],
+        filename: filename,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, allowTaint: true, scrollY: 0, scrollX: 0, windowWidth: 800 },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+
+      const pdfBlob = await html2pdf().set(opt).from(invoiceElement).outputPdf('blob');
+      const pdfFile = new File([pdfBlob], filename, { type: 'application/pdf' });
+
+      if (navigator.canShare({ files: [pdfFile] })) {
+        await navigator.share({
+          files: [pdfFile],
+          title: `NDS Invoice #${invoiceNo}`,
+          text: customMsg
+        });
+        showToast('Receipt PDF shared to WhatsApp!', 'success');
+        return;
+      }
+    } catch (shareErr) {
+      console.warn('Native file share failed or dismissed, proceeding with WhatsApp link fallback', shareErr);
+    }
+  }
+
+  // 3. Desktop WhatsApp Web: Opens pre-filled chat with parent
+  const whatsappUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(customMsg)}`;
+  window.open(whatsappUrl, '_blank');
+  showToast('Opening WhatsApp! PDF downloaded — click 📎 in chat to attach.', 'success');
 }
 
 
