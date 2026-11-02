@@ -213,9 +213,17 @@
           </div>
           
           <div class="att-controls-row">
-            <div class="att-date-wrapper">
+            <div class="att-date-wrapper" style="flex: 1.2;">
               <span class="att-date-label">CLASS DATE</span>
               <input type="date" id="attendance-date-picker" class="att-date-input">
+            </div>
+            <div class="att-batch-wrapper" style="flex: 1;">
+              <span class="att-date-label">BATCH / GROUP</span>
+              <div class="custom-select-wrapper">
+                <select id="attendance-batch-filter" class="att-date-input" style="padding: 10px 12px; height: auto;">
+                  <option value="all">All Batches</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -272,15 +280,34 @@
           <!-- Holidays / Off-Days Configuration -->
           <div class="settings-section glass-card">
             <h3 class="settings-section-title italic-heading">HOLIDAYS &amp; OFF DAYS</h3>
-            <p class="settings-help-text">Mark Sundays as holiday automatically, or add specific dates (festivals, occasions). These days will be excluded from attendance tracking.</p>
+            <p class="settings-help-text">Configure studio holidays and Sunday schedules. Keep Sunday as a holiday for regular batches while running Sunday classes for Classical dance groups.</p>
             
             <div class="holiday-checkbox-row">
               <label class="custom-checkbox-label">
                 <input type="checkbox" id="setting-auto-sunday" class="custom-checkbox">
-                <span>Auto-mark every Sunday as holiday</span>
+                <span>Auto-mark Sundays as holiday for regular weekday batches</span>
               </label>
             </div>
 
+            <!-- Sunday Class Batches / Dance Groups -->
+            <div id="sunday-batches-config-card" style="margin-top: 14px; padding: 12px 14px; background: rgba(227, 28, 37, 0.05); border: 1px dashed rgba(227, 28, 37, 0.3); border-radius: 10px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                <span style="font-size: 0.82rem; font-weight: 700; color: var(--brand-white); display: flex; align-items: center; gap: 6px;">
+                  🩰 Batches with Sunday Classes
+                </span>
+                <span class="badge badge-success" style="font-size: 0.65rem;">Active on Sundays</span>
+              </div>
+              <p style="font-size: 0.72rem; color: var(--text-secondary); margin-bottom: 10px;">
+                Select dance groups that have classes on Sundays (exempted from Sunday holiday, e.g. Classical / Bharathanatyam):
+              </p>
+              <div id="sunday-batches-list" style="display: flex; flex-direction: column; gap: 8px;">
+                <!-- Populated dynamically by JS for each batch -->
+              </div>
+            </div>
+
+            <div style="margin-top: 18px; margin-bottom: 8px;">
+              <span style="font-size: 0.75rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Add Studio-Wide Holiday (Festivals / Occasions)</span>
+            </div>
             <div class="holiday-add-row">
               <input type="date" id="holiday-date-input" class="holiday-date-input">
               <button id="btn-add-holiday" class="btn btn-primary btn-sm">Add Holiday</button>
@@ -568,14 +595,28 @@
         
         <div class="form-row">
           <div class="form-group">
-            <label for="student-fee">Monthly Fee (₹) *</label>
-            <input type="number" id="student-fee" required min="0" placeholder="1500" value="1500">
+            <label for="student-admission-fee">Admission Fee (₹)</label>
+            <input type="number" id="student-admission-fee" min="0" placeholder="0" value="0">
+            <span style="font-size: 0.68rem; color: var(--text-muted); display: block; margin-top: 4px;">One-time admission charge</span>
           </div>
           
           <div class="form-group">
-            <label for="student-admission">Admission Date</label>
-            <input type="date" id="student-admission">
+            <label for="student-fee">Monthly Fee (₹) *</label>
+            <input type="number" id="student-fee" required min="0" placeholder="1500" value="1500">
+            <span style="font-size: 0.68rem; color: var(--text-muted); display: block; margin-top: 4px;">Standard batch monthly fee</span>
           </div>
+        </div>
+
+        <div class="form-group" style="margin-top: -4px; margin-bottom: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255, 255, 255, 0.03); border: 1px dashed rgba(227, 28, 37, 0.3); border-radius: 8px; padding: 8px 12px; font-size: 0.78rem;">
+            <span style="color: var(--text-secondary);">Total Initial Admission Amount:</span>
+            <strong id="student-total-initial-fee" style="color: var(--brand-white); font-size: 0.9rem;">₹1,500</strong>
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label for="student-admission">Admission Date</label>
+          <input type="date" id="student-admission">
         </div>
 
         <div class="form-group" id="status-group" style="display: none;">
@@ -722,6 +763,10 @@
         <div class="info-row">
           <span class="info-lbl">Admission Date:</span>
           <span id="detail-student-admission" class="info-val">12 May 2026</span>
+        </div>
+        <div class="info-row" id="detail-admission-fee-row" style="display: none;">
+          <span class="info-lbl">Admission Fee Paid:</span>
+          <span id="detail-student-admission-fee" class="info-val">₹0</span>
         </div>
       </div>
 

@@ -8,6 +8,7 @@ let state = {
   attendance: [],    // [{ date:'YYYY-MM-DD', studentId, status:'present'|'absent' }]
   holidays: [],      // ['YYYY-MM-DD', ...]
   autoSunday: false, // auto-mark every Sunday as holiday
+  sundayBatches: ["Bharathanatyam batch"], // batches with Sunday classes (Classical)
   batchPricing: {
     "Kids batch (batch 1)": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 },
     "Intermediate (batch 2)": { "1m": 2000, "3m": 5500, "6m": 10000, "12m": 19000 },
@@ -35,6 +36,7 @@ const DEFAULT_STATE = {
   attendance: [],
   holidays: [],
   autoSunday: false,
+  sundayBatches: ["Bharathanatyam batch"],
   batchPricing: {
     "Kids batch (batch 1)": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 },
     "Intermediate (batch 2)": { "1m": 2000, "3m": 5500, "6m": 10000, "12m": 19000 },
@@ -126,6 +128,9 @@ function initApp() {
       state.attendance = state.attendance || [];
       state.holidays = state.holidays || [];
       state.autoSunday = state.autoSunday || false;
+      if (!Array.isArray(state.sundayBatches) || state.sundayBatches.length === 0) {
+        state.sundayBatches = ["Bharathanatyam batch"];
+      }
       if (!state.batchPricing) state.batchPricing = { ...DEFAULT_STATE.batchPricing };
       if (!state.batchPricing["Bharathanatyam batch"]) {
         state.batchPricing["Bharathanatyam batch"] = { ...DEFAULT_STATE.batchPricing["Bharathanatyam batch"] };
@@ -1013,6 +1018,18 @@ function showStudentDetails(studentId) {
   const admDate = student.admissionDate ? new Date(student.admissionDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Not Listed';
   document.getElementById('detail-student-admission').textContent = admDate;
   
+  const admFee = parseInt(student.admissionFee || 0);
+  const admFeeRow = document.getElementById('detail-admission-fee-row');
+  const admFeeVal = document.getElementById('detail-student-admission-fee');
+  if (admFeeRow && admFeeVal) {
+    if (admFee > 0) {
+      admFeeRow.style.display = 'flex';
+      admFeeVal.textContent = `₹${admFee.toLocaleString('en-IN')}`;
+    } else {
+      admFeeRow.style.display = 'none';
+    }
+  }
+  
   // Chip styling & Membership Status
   const statusBadge = document.getElementById('detail-status-badge');
   const memStatus = getStudentMembershipStatus(student);
@@ -1069,7 +1086,7 @@ function showStudentDetails(studentId) {
   historyList.innerHTML = '';
   
   if (studentPayments.length === 0) {
-    historyList.innerHTML = `<div class="detail-payment-row empty-row">No recorded fee receipt.</div>`;
+    historyList.innerHTML = '';
   } else {
     studentPayments.forEach(p => {
       // Validity duration display fallback
@@ -1101,6 +1118,27 @@ function showStudentDetails(studentId) {
       historyList.appendChild(row);
     });
   }
+
+  // Always include Admission & Joining Receipt at the bottom of history
+  const admDateShort = student.admissionDate ? new Date(student.admissionDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) : 'Joining';
+  const monthlyFeeVal = parseInt(student.monthlyFee || 0);
+  const totalAdmissionVal = admFee + monthlyFeeVal;
+  
+  const admRow = document.createElement('div');
+  admRow.className = 'detail-payment-row';
+  admRow.style.background = 'rgba(227, 28, 37, 0.05)';
+  admRow.style.border = '1px dashed rgba(227, 28, 37, 0.25)';
+  admRow.innerHTML = `
+    <div style="display:flex; flex-direction:column; gap:2px;">
+      <span style="font-weight:600; color:var(--brand-white);">Admission & 1st Month Fee</span>
+      <span style="font-size:0.7rem; color:var(--text-muted);">Admitted: ${admDateShort} ${admFee > 0 ? `(Adm: ₹${admFee.toLocaleString('en-IN')} + Fee: ₹${monthlyFeeVal.toLocaleString('en-IN')})` : ''}</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <span><strong>₹${totalAdmissionVal.toLocaleString('en-IN')}</strong></span>
+      <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openInvoiceForAdmission('${student.id}')" title="Download Admission Receipt PDF" style="padding: 3px 8px; font-size: 0.68rem; border-color: rgba(227,28,37,0.35); display: flex; align-items: center; gap: 4px; color: var(--brand-white);"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> PDF</button>
+    </div>
+  `;
+  historyList.appendChild(admRow);
 
   // Load Attendance Record for this specific student
   const studentAtt = (state.attendance || [])
@@ -1325,6 +1363,20 @@ function initFormsAndModals() {
   const statusFilter = document.getElementById('student-status-filter');
   if (statusFilter) statusFilter.addEventListener('change', renderStudents);
 
+  function updateStudentInitialFeePreview() {
+    const adm = parseInt(document.getElementById('student-admission-fee')?.value || 0);
+    const fee = parseInt(document.getElementById('student-fee')?.value || 0);
+    const totalEl = document.getElementById('student-total-initial-fee');
+    if (totalEl) {
+      totalEl.textContent = `₹${(adm + fee).toLocaleString('en-IN')}`;
+    }
+  }
+
+  const admFeeInput = document.getElementById('student-admission-fee');
+  const feeInput = document.getElementById('student-fee');
+  if (admFeeInput) admFeeInput.addEventListener('input', updateStudentInitialFeePreview);
+  if (feeInput) feeInput.addEventListener('input', updateStudentInitialFeePreview);
+
   const studentBatchSelect = document.getElementById('student-batch');
   if (studentBatchSelect) {
     studentBatchSelect.addEventListener('change', () => {
@@ -1334,6 +1386,7 @@ function initFormsAndModals() {
       if (!studentId && batch && state.batchPricing[batch] && feeInput) {
         feeInput.value = state.batchPricing[batch]['1m'] || 1500;
       }
+      updateStudentInitialFeePreview();
     });
   }
   
@@ -1406,6 +1459,9 @@ function initFormsAndModals() {
       const today = new Date().toISOString().split('T')[0];
       document.getElementById('student-admission').value = today;
       document.getElementById('student-fee').value = '1500';
+      const admFeeEl = document.getElementById('student-admission-fee');
+      if (admFeeEl) admFeeEl.value = '0';
+      updateStudentInitialFeePreview();
       
       document.getElementById('student-modal-title').textContent = 'ADMIT NEW STUDENT';
       document.getElementById('status-group').style.display = 'none'; // Hide status (new defaults to active)
@@ -1457,6 +1513,7 @@ function initFormsAndModals() {
       const phone = document.getElementById('student-phone').value.trim();
       const parentName = document.getElementById('student-parent').value.trim();
       const batch = document.getElementById('student-batch').value.trim();
+      const admissionFee = parseInt(document.getElementById('student-admission-fee')?.value || 0);
       const monthlyFee = parseInt(document.getElementById('student-fee').value || 0);
       const admissionDate = document.getElementById('student-admission').value;
       const photo = document.getElementById('student-photo-base64').value || '';
@@ -1469,6 +1526,7 @@ function initFormsAndModals() {
           phone,
           parentName,
           batch,
+          admissionFee,
           monthlyFee,
           admissionDate,
           photo,
@@ -1497,6 +1555,7 @@ function initFormsAndModals() {
             phone,
             parentName,
             batch,
+            admissionFee,
             monthlyFee,
             admissionDate,
             photo,
@@ -1630,6 +1689,11 @@ function initFormsAndModals() {
       batchSelect.value = student.batch || '';
       
       document.getElementById('student-fee').value = student.monthlyFee;
+      const admEditInput = document.getElementById('student-admission-fee');
+      if (admEditInput) {
+        admEditInput.value = student.admissionFee !== undefined ? student.admissionFee : 0;
+      }
+      updateStudentInitialFeePreview();
       document.getElementById('student-admission').value = student.admissionDate || '';
       
       // Show and populate status dropdown
@@ -1725,6 +1789,10 @@ function initDataAdministration() {
               state.masterName = parsed.masterName || '';
               state.students = parsed.students || [];
               state.payments = parsed.payments || [];
+              if (parsed.holidays) state.holidays = parsed.holidays;
+              if (parsed.autoSunday !== undefined) state.autoSunday = parsed.autoSunday;
+              if (parsed.sundayBatches) state.sundayBatches = parsed.sundayBatches;
+              if (parsed.batchPricing) state.batchPricing = parsed.batchPricing;
               
               saveState();
               updateMasterGreeting();
@@ -1930,29 +1998,73 @@ setTimeout(() => {
 
 // ==================== ATTENDANCE MODULE ====================
 
-// Returns true if a given date string (YYYY-MM-DD) is a holiday
-function isHoliday(dateStr) {
-  const d = new Date(dateStr);
-  // Check auto-sunday
-  if (state.autoSunday && d.getDay() === 0) return true;
-  // Check manual holidays list
-  return (state.holidays || []).includes(dateStr);
+// Check if a specific batch has classes on Sunday (defaults to Classical / Bharathanatyam)
+function isBatchSundayActive(batchName) {
+  if (!batchName) return false;
+  const sundayBatches = state.sundayBatches || ["Bharathanatyam batch"];
+  if (sundayBatches.includes(batchName)) return true;
+  const lower = batchName.toLowerCase();
+  return lower.includes('classical') || lower.includes('bharathanatyam') || lower.includes('bharatanatyam');
+}
+
+// Returns true if a given date string (YYYY-MM-DD) is a holiday (batch-aware for Sundays)
+function isHoliday(dateStr, batch = null) {
+  // Check manual studio-wide holidays list (festivals, emergencies)
+  if ((state.holidays || []).includes(dateStr)) return true;
+
+  const d = new Date(dateStr + 'T00:00:00');
+  const isSunday = d.getDay() === 0;
+
+  if (isSunday && state.autoSunday) {
+    if (batch) {
+      return !isBatchSundayActive(batch);
+    }
+    const sundayBatches = state.sundayBatches || ["Bharathanatyam batch"];
+    return sundayBatches.length === 0;
+  }
+
+  return false;
 }
 
 // Returns last N class dates (non-holiday days), going backwards from a given date
-function getLastClassDates(fromDateStr, count) {
+function getLastClassDates(fromDateStr, count, batch = null) {
   const dates = [];
-  const d = new Date(fromDateStr);
+  const d = new Date(fromDateStr + 'T00:00:00');
   d.setHours(0, 0, 0, 0);
   let safety = 0;
   while (dates.length < count && safety < 120) {
     const s = d.toISOString().split('T')[0];
-    if (!isHoliday(s)) dates.push(s);
+    if (!isHoliday(s, batch)) dates.push(s);
     d.setDate(d.getDate() - 1);
     safety++;
   }
   return dates;
 }
+
+// Populates batch options in Attendance tab filter
+function updateAttendanceBatchOptions() {
+  const select = document.getElementById('attendance-batch-filter');
+  if (!select) return;
+
+  const currentVal = select.value || 'all';
+  const allBatches = [...new Set(
+    (state.students || []).map(s => s.batch).concat(Object.keys(state.batchPricing || {}))
+  )].filter(Boolean);
+
+  select.innerHTML = '<option value="all">All Batches</option>';
+  allBatches.forEach(b => {
+    const opt = document.createElement('option');
+    opt.value = b;
+    opt.textContent = isBatchSundayActive(b) ? `🩰 ${b} (Sunday Active)` : b;
+    select.appendChild(opt);
+  });
+
+  if (Array.from(select.options).some(o => o.value === currentVal)) {
+    select.value = currentVal;
+  }
+}
+
+let showAllBatchesOnSunday = false;
 
 // Returns consecutive absent count for a student based on actual logged class history
 function getConsecutiveAbsences(studentId) {
@@ -1986,26 +2098,83 @@ function renderAttendance() {
   const summaryText = document.getElementById('att-summary-text');
   const holidayBadge = document.getElementById('att-holiday-badge');
   const searchInput = document.getElementById('attendance-search-input');
+  const batchFilterSelect = document.getElementById('attendance-batch-filter');
   if (!container) return;
 
-  const searchVal = (searchInput ? searchInput.value : '').toLowerCase().trim();
-  const isHol = isHoliday(selectedDate);
-  const activeStudents = state.students.filter(s => s.status === 'active');
+  updateAttendanceBatchOptions();
 
-  if (isHol) {
-    const dow = new Date(selectedDate).toLocaleDateString('en-IN', { weekday: 'long' });
+  const selectedBatch = batchFilterSelect ? batchFilterSelect.value : 'all';
+  const searchVal = (searchInput ? searchInput.value : '').toLowerCase().trim();
+  const d = new Date(selectedDate + 'T00:00:00');
+  const isSunday = d.getDay() === 0;
+  const dow = d.toLocaleDateString('en-IN', { weekday: 'long' });
+  const isManualHol = (state.holidays || []).includes(selectedDate);
+  const activeStudents = state.students.filter(s => s.status === 'active');
+  const sundayBatches = state.sundayBatches || ["Bharathanatyam batch"];
+
+  // 1. Studio-wide manual holiday (e.g. Festival or studio emergency closure)
+  if (isManualHol) {
     container.innerHTML = `
       <div class="empty-state">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>
         <p style="font-weight:700; color:var(--warning-gold); font-size:0.95rem;">${dow} is marked as a Studio Holiday!</p>
-        <span style="font-size:0.75rem; color:var(--text-secondary);">No class attendance required for this date.</span>
+        <span style="font-size:0.75rem; color:var(--text-secondary);">All studio classes suspended for this date.</span>
       </div>
     `;
-    if (summaryText) summaryText.textContent = 'Holiday — class suspended';
-    if (holidayBadge) holidayBadge.style.display = 'inline-flex';
+    if (summaryText) summaryText.textContent = 'Holiday — all classes suspended';
+    if (holidayBadge) {
+      holidayBadge.textContent = 'HOLIDAY';
+      holidayBadge.className = 'badge badge-warning';
+      holidayBadge.style.display = 'inline-flex';
+    }
     return;
+  }
+
+  // 2. Sunday Handling with autoSunday
+  const isSundayHolidayActive = isSunday && state.autoSunday;
+
+  if (isSundayHolidayActive && sundayBatches.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>
+        <p style="font-weight:700; color:var(--warning-gold); font-size:0.95rem;">Sunday is marked as a Studio Holiday!</p>
+        <span style="font-size:0.75rem; color:var(--text-secondary);">No Sunday classes scheduled. You can enable Sunday classes for Classical batches in Settings.</span>
+      </div>
+    `;
+    if (summaryText) summaryText.textContent = 'Sunday Holiday — regular classes off';
+    if (holidayBadge) {
+      holidayBadge.textContent = 'SUNDAY OFF';
+      holidayBadge.className = 'badge badge-warning';
+      holidayBadge.style.display = 'inline-flex';
+    }
+    return;
+  }
+
+  // Determine which students have classes today
+  let classStudents = activeStudents;
+  let isSundaySession = false;
+
+  if (isSundayHolidayActive) {
+    isSundaySession = true;
+    if (holidayBadge) {
+      holidayBadge.style.display = 'inline-flex';
+      holidayBadge.textContent = '🩰 SUNDAY CLASS ACTIVE';
+      holidayBadge.className = 'badge badge-success';
+    }
+
+    if (selectedBatch === 'all') {
+      if (!showAllBatchesOnSunday) {
+        // Show students of batches that have Sunday classes (Classical / Bharathanatyam)
+        classStudents = activeStudents.filter(s => isBatchSundayActive(s.batch));
+      }
+    } else {
+      classStudents = activeStudents.filter(s => s.batch === selectedBatch);
+    }
   } else {
     if (holidayBadge) holidayBadge.style.display = 'none';
+    if (selectedBatch !== 'all') {
+      classStudents = activeStudents.filter(s => s.batch === selectedBatch);
+    }
   }
 
   // Build or reuse attendance map for this date
@@ -2018,14 +2187,10 @@ function renderAttendance() {
   }
   const attendanceMap = container._attendanceMap;
 
-  const presentCount = activeStudents.filter(s => attendanceMap[s.id] === 'present').length;
-  const absentCount = activeStudents.filter(s => attendanceMap[s.id] === 'absent').length;
-  const unmarkedCount = activeStudents.filter(s => !attendanceMap[s.id]).length;
-
   // Filter list by search query
-  let filteredStudents = activeStudents;
+  let displayStudents = classStudents;
   if (searchVal) {
-    filteredStudents = activeStudents.filter(s => 
+    displayStudents = classStudents.filter(s => 
       s.name.toLowerCase().includes(searchVal) ||
       (s.batch && s.batch.toLowerCase().includes(searchVal)) ||
       (s.phone && s.phone.includes(searchVal)) ||
@@ -2033,14 +2198,64 @@ function renderAttendance() {
     );
   }
 
+  const presentCount = displayStudents.filter(s => attendanceMap[s.id] === 'present').length;
+  const absentCount = displayStudents.filter(s => attendanceMap[s.id] === 'absent').length;
+  const unmarkedCount = displayStudents.filter(s => !attendanceMap[s.id]).length;
+
   if (summaryText) {
-    summaryText.textContent = `${activeStudents.length} enrolled • ${presentCount} present • ${absentCount} absent${unmarkedCount > 0 ? ` • ${unmarkedCount} pending` : ''}`;
+    const contextNote = isSundaySession && !showAllBatchesOnSunday && selectedBatch === 'all'
+      ? `Sunday Class: ${displayStudents.length} enrolled`
+      : `${displayStudents.length} students`;
+    summaryText.textContent = `${contextNote} • ${presentCount} present • ${absentCount} absent${unmarkedCount > 0 ? ` • ${unmarkedCount} pending` : ''}`;
   }
 
   container.innerHTML = '';
 
-  if (filteredStudents.length === 0) {
-    container.innerHTML = `<div class="empty-state"><p>${searchVal ? 'No students match your search.' : 'No active students enrolled yet.'}</p></div>`;
+  // If Sunday class session, add top informative banner with toggle option
+  if (isSundaySession) {
+    const banner = document.createElement('div');
+    banner.className = 'glass-card animated-fade-in';
+    banner.style.cssText = 'padding:10px 14px; margin-bottom:12px; background:rgba(227,28,37,0.08); border:1px solid rgba(227,28,37,0.3); border-radius:10px; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;';
+    banner.innerHTML = `
+      <div style="flex:1; min-width:200px;">
+        <div style="font-weight:700; font-size:0.84rem; color:var(--brand-white); display:flex; align-items:center; gap:6px;">
+          <span>🩰 Sunday Classical & Dance Session</span>
+          <span class="badge badge-success" style="font-size:0.62rem; padding:2px 6px;">CLASS DAY</span>
+        </div>
+        <div style="font-size:0.72rem; color:var(--text-secondary); margin-top:2px;">
+          Sunday schedule active for: <strong style="color:var(--brand-white);">${sundayBatches.join(', ')}</strong>. Weekday batches have Sunday off.
+        </div>
+      </div>
+      <button id="btn-toggle-sunday-batches" class="btn btn-secondary btn-xs" style="padding:4px 10px; font-size:0.7rem; border-color:rgba(255,255,255,0.2);">
+        ${showAllBatchesOnSunday ? 'Show Sunday Batches Only' : 'Show All Studio Batches'}
+      </button>
+    `;
+    container.appendChild(banner);
+
+    const toggleBtn = banner.querySelector('#btn-toggle-sunday-batches');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', () => {
+        showAllBatchesOnSunday = !showAllBatchesOnSunday;
+        renderAttendance();
+      });
+    }
+  }
+
+  if (displayStudents.length === 0) {
+    if (isSundaySession && !isBatchSundayActive(selectedBatch) && selectedBatch !== 'all') {
+      const emptyDiv = document.createElement('div');
+      emptyDiv.className = 'empty-state';
+      emptyDiv.innerHTML = `
+        <p style="font-weight:700; color:var(--warning-gold); font-size:0.92rem;">${selectedBatch} has Sunday Off</p>
+        <span style="font-size:0.75rem; color:var(--text-secondary);">Sunday classes are running for: <strong>${sundayBatches.join(', ')}</strong>. Select that batch or "All Batches" above to take attendance.</span>
+      `;
+      container.appendChild(emptyDiv);
+      return;
+    }
+    const emptyDiv = document.createElement('div');
+    emptyDiv.className = 'empty-state';
+    emptyDiv.innerHTML = `<p>${searchVal ? 'No students match your search.' : (isSundaySession ? 'No active students enrolled in Sunday batches.' : 'No active students found.')}</p>`;
+    container.appendChild(emptyDiv);
     return;
   }
 
@@ -2188,12 +2403,14 @@ function checkAndShowAbsenceAlerts(targetStudent = null, streakCount = 0) {
 function initAttendance() {
   const datePicker = document.getElementById('attendance-date-picker');
   const searchInput = document.getElementById('attendance-search-input');
+  const batchFilter = document.getElementById('attendance-batch-filter');
 
   if (datePicker) {
     if (!datePicker.value) {
       datePicker.value = new Date().toISOString().split('T')[0];
     }
     const updateDateAndRender = () => {
+      showAllBatchesOnSunday = false;
       const container = document.getElementById('attendance-list');
       if (container) {
         delete container._attendanceMap;
@@ -2208,9 +2425,61 @@ function initAttendance() {
   if (searchInput) {
     searchInput.addEventListener('input', renderAttendance);
   }
+
+  if (batchFilter) {
+    batchFilter.addEventListener('change', renderAttendance);
+  }
 }
 
 // ==================== HOLIDAY SETTINGS MODULE ====================
+
+function renderSundayBatchesList() {
+  const list = document.getElementById('sunday-batches-list');
+  if (!list) return;
+
+  const sundayBatches = state.sundayBatches || ["Bharathanatyam batch"];
+  const allBatches = [...new Set(
+    Object.keys(state.batchPricing || {}).concat((state.students || []).map(s => s.batch))
+  )].filter(Boolean);
+
+  list.innerHTML = '';
+  allBatches.forEach(batch => {
+    const isChecked = sundayBatches.includes(batch);
+    const isClassical = batch.toLowerCase().includes('classical') || batch.toLowerCase().includes('bharathanatyam');
+
+    const row = document.createElement('label');
+    row.className = 'custom-checkbox-label';
+    row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:8px; cursor:pointer; transition:all 0.2s ease;';
+    row.innerHTML = `
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:0.82rem; font-weight:600; color:var(--brand-white);">${batch}</span>
+        ${isClassical ? '<span class="badge" style="font-size:0.62rem; background:rgba(227,28,37,0.15); color:var(--brand-red); border:1px solid rgba(227,28,37,0.3);">Classical</span>' : ''}
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="sunday-batch-status-text" style="font-size:0.7rem; color:${isChecked ? 'var(--success-green)' : 'var(--text-muted)'}; font-weight:600;">${isChecked ? 'Class on Sunday' : 'Sunday Off'}</span>
+        <input type="checkbox" class="custom-checkbox sunday-batch-toggle" data-batch="${batch}" ${isChecked ? 'checked' : ''} style="width:16px; height:16px; accent-color:var(--brand-red); cursor:pointer;">
+      </div>
+    `;
+
+    const checkbox = row.querySelector('.sunday-batch-toggle');
+    checkbox.addEventListener('change', () => {
+      const bName = checkbox.dataset.batch;
+      let currentSundays = [...(state.sundayBatches || ["Bharathanatyam batch"])];
+      if (checkbox.checked) {
+        if (!currentSundays.includes(bName)) currentSundays.push(bName);
+        showToast(`Sunday classes enabled for ${bName}! 🩰`, 'success');
+      } else {
+        currentSundays = currentSundays.filter(b => b !== bName);
+        showToast(`Sunday classes disabled for ${bName}`, 'info');
+      }
+      state.sundayBatches = currentSundays;
+      saveState();
+      renderSundayBatchesList();
+    });
+
+    list.appendChild(row);
+  });
+}
 
 function renderHolidaysList() {
   const list = document.getElementById('holidays-list');
@@ -2218,6 +2487,8 @@ function renderHolidaysList() {
   if (!list) return;
 
   if (autoCheck) autoCheck.checked = state.autoSunday || false;
+
+  renderSundayBatchesList();
 
   const holidays = (state.holidays || []).sort();
   list.innerHTML = '';
@@ -2652,6 +2923,7 @@ async function restoreFromGoogleDrive() {
         attendance: backupData.attendance || [],
         holidays: backupData.holidays || [],
         autoSunday: backupData.autoSunday || false,
+        sundayBatches: backupData.sundayBatches || state.sundayBatches || ["Bharathanatyam batch"],
         batchPricing: backupData.batchPricing || state.batchPricing,
         gdrive: currentGdrive
       };
@@ -2696,6 +2968,31 @@ function renderInvoiceModal(data) {
 
   const masterName = state.masterName || 'Niki';
   const student = data.student || {};
+
+  // Support itemized breakdown (e.g. Admission Fee + Monthly Fee) or single line item
+  const items = Array.isArray(data.items) && data.items.length > 0
+    ? data.items
+    : [{
+        title: data.itemTitle || 'Fee Payment',
+        sub: data.itemSub || '',
+        period: data.period || '-',
+        amount: parseInt(data.amount || 0)
+      }];
+
+  const totalAmount = data.totalAmount !== undefined
+    ? data.totalAmount
+    : items.reduce((sum, it) => sum + (parseInt(it.amount) || 0), 0);
+
+  const itemsRowsHtml = items.map(it => `
+    <tr>
+      <td>
+        <strong>${it.title}</strong>
+        ${it.sub ? `<div style="font-size:0.75rem; color:#6b7280; margin-top:3px;">${it.sub}</div>` : ''}
+      </td>
+      <td>${it.period || '-'}</td>
+      <td class="col-amount">₹${parseInt(it.amount || 0).toLocaleString('en-IN')}</td>
+    </tr>
+  `).join('');
 
   printable.innerHTML = `
     <div class="inv-header">
@@ -2743,19 +3040,12 @@ function renderInvoiceModal(data) {
         </tr>
       </thead>
       <tbody>
-        <tr>
-          <td>
-            <strong>${data.itemTitle}</strong>
-            <div style="font-size:0.75rem; color:#6b7280; margin-top:3px;">${data.itemSub}</div>
-          </td>
-          <td>${data.period}</td>
-          <td class="col-amount">₹${data.amount.toLocaleString('en-IN')}</td>
-        </tr>
+        ${itemsRowsHtml}
       </tbody>
       <tfoot>
         <tr class="inv-table-total-row">
           <td colspan="2" class="inv-total-label">Total Amount Paid:</td>
-          <td class="inv-total-amount">₹${data.amount.toLocaleString('en-IN')}</td>
+          <td class="inv-total-amount">₹${totalAmount.toLocaleString('en-IN')}</td>
         </tr>
       </tfoot>
     </table>
@@ -2890,7 +3180,33 @@ window.openInvoiceForAdmission = function(studentId) {
     year: 'numeric'
   });
 
-  const defaultMsg = `Dear Parent, welcome to Niki Dance Studio (NDS)! We are delighted to confirm ${student.name}'s admission for ${student.batch || 'General Batch'}.\n\n📄 Admission Receipt: #${invoiceNo}\n📅 Admission Date: ${admDateFormatted}\n💳 Monthly Class Fee: ₹${parseInt(student.monthlyFee || 0).toLocaleString('en-IN')}\n\nLet's dance and shine! 💃🕺`;
+  const admissionFee = parseInt(student.admissionFee || 0);
+  const monthlyFee = parseInt(student.monthlyFee || 0);
+  const totalPaid = admissionFee + monthlyFee;
+
+  const items = [
+    {
+      title: 'Admission & Registration Fee',
+      sub: admissionFee > 0 ? 'One-time admission & studio membership enrollment' : 'One-time admission charge (Complimentary / Waived)',
+      period: 'One-Time',
+      amount: admissionFee
+    },
+    {
+      title: `Monthly Class Fee (${student.batch || 'General Batch'})`,
+      sub: 'First month dance training fee • Active Enrollment',
+      period: `Admitted: ${admDateFormatted}`,
+      amount: monthlyFee
+    }
+  ];
+
+  let breakdownText = '';
+  if (admissionFee > 0) {
+    breakdownText = `💳 Fee Breakdown:\n   • Admission Fee: ₹${admissionFee.toLocaleString('en-IN')}\n   • Monthly Class Fee: ₹${monthlyFee.toLocaleString('en-IN')}\n   • Total Paid: ₹${totalPaid.toLocaleString('en-IN')}`;
+  } else {
+    breakdownText = `💳 Fee Breakdown:\n   • Admission Fee: ₹0 (Waived)\n   • Monthly Class Fee: ₹${monthlyFee.toLocaleString('en-IN')}\n   • Total Paid: ₹${totalPaid.toLocaleString('en-IN')}`;
+  }
+
+  const defaultMsg = `Dear Parent, welcome to Niki Dance Studio (NDS)! We are delighted to confirm ${student.name}'s admission for ${student.batch || 'General Batch'}.\n\n📄 Admission Receipt: #${invoiceNo}\n📅 Admission Date: ${admDateFormatted}\n🩰 Batch: ${student.batch || 'General Batch'}\n\n${breakdownText}\n\nLet's dance and shine! 💃🕺`;
 
   renderInvoiceModal({
     type: 'admission',
@@ -2899,11 +3215,9 @@ window.openInvoiceForAdmission = function(studentId) {
     invoiceNo,
     invoiceDate,
     student,
-    itemTitle: `New Student Admission & Registration`,
-    itemSub: `Dance Batch: ${student.batch || 'General Batch'} • Status: Active Member`,
-    period: `Admitted: ${admDateFormatted}`,
-    method: 'Registration',
-    amount: parseInt(student.monthlyFee || 0),
+    items,
+    totalAmount: totalPaid,
+    method: 'Registration / Direct',
     statusLabel: 'ADMISSION CONFIRMED',
     stampText: '✓ ADMISSION VERIFIED',
     defaultMsg
