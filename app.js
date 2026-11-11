@@ -123,6 +123,10 @@ function initApp() {
       state = JSON.parse(storedData);
       // Ensure arrays and new fields exist
       state.students = state.students || [];
+      // Ensure all students have a status (default active)
+      state.students.forEach(s => {
+        if (!s.status) s.status = 'active';
+      });
       state.payments = state.payments || [];
       state.masterName = state.masterName || '';
       state.attendance = state.attendance || [];
@@ -543,7 +547,7 @@ window.payDueMonth = function(studentId) {
 // ==================== VIEW 1: DASHBOARD LOGIC ====================
 function renderDashboard() {
   // Get active students
-  const activeStudents = state.students.filter(s => s.status === 'active');
+  const activeStudents = state.students.filter(s => s.status !== 'inactive');
   document.getElementById('stat-total-students').textContent = activeStudents.length;
   
   const today = new Date();
@@ -836,7 +840,7 @@ function populateStudentDropdown() {
   
   // Sort active students alphabetically
   const activeStudentsSorted = state.students
-    .filter(s => s.status === 'active')
+    .filter(s => s.status !== 'inactive')
     .sort((a, b) => a.name.localeCompare(b.name));
     
   studentSelect.innerHTML = '<option value="">-- Choose Student --</option>';
@@ -2051,6 +2055,12 @@ function updateAttendanceBatchOptions() {
     (state.students || []).map(s => s.batch).concat(Object.keys(state.batchPricing || {}))
   )].filter(Boolean);
 
+  const existingValues = Array.from(select.options).map(o => o.value);
+  const neededValues = ['all', ...allBatches];
+  if (existingValues.length === neededValues.length && existingValues.every((v, i) => v === neededValues[i])) {
+    return;
+  }
+
   select.innerHTML = '<option value="all">All Batches</option>';
   allBatches.forEach(b => {
     const opt = document.createElement('option');
@@ -2109,7 +2119,7 @@ function renderAttendance() {
   const isSunday = d.getDay() === 0;
   const dow = d.toLocaleDateString('en-IN', { weekday: 'long' });
   const isManualHol = (state.holidays || []).includes(selectedDate);
-  const activeStudents = state.students.filter(s => s.status === 'active');
+  const activeStudents = state.students.filter(s => s.status !== 'inactive');
   const sundayBatches = state.sundayBatches || ["Bharathanatyam batch"];
 
   // 1. Studio-wide manual holiday (e.g. Festival or studio emergency closure)
@@ -2165,7 +2175,9 @@ function renderAttendance() {
     if (selectedBatch === 'all') {
       if (!showAllBatchesOnSunday) {
         // Show students of batches that have Sunday classes (Classical / Bharathanatyam)
-        classStudents = activeStudents.filter(s => isBatchSundayActive(s.batch));
+        const matchingSundayStudents = activeStudents.filter(s => isBatchSundayActive(s.batch));
+        // If there are students in Sunday batches, show them; otherwise fallback to all active
+        classStudents = matchingSundayStudents.length > 0 ? matchingSundayStudents : activeStudents;
       }
     } else {
       classStudents = activeStudents.filter(s => s.batch === selectedBatch);
@@ -2191,7 +2203,7 @@ function renderAttendance() {
   let displayStudents = classStudents;
   if (searchVal) {
     displayStudents = classStudents.filter(s => 
-      s.name.toLowerCase().includes(searchVal) ||
+      (s.name || '').toLowerCase().includes(searchVal) ||
       (s.batch && s.batch.toLowerCase().includes(searchVal)) ||
       (s.phone && s.phone.includes(searchVal)) ||
       (s.parentName && s.parentName.toLowerCase().includes(searchVal))
@@ -2259,7 +2271,7 @@ function renderAttendance() {
     return;
   }
 
-  filteredStudents.sort((a, b) => a.name.localeCompare(b.name)).forEach(student => {
+  displayStudents.sort((a, b) => (a.name || '').localeCompare(b.name || '')).forEach(student => {
     const status = attendanceMap[student.id]; // 'present', 'absent', or undefined
     const isPresent = status === 'present';
     const isAbsent = status === 'absent';
@@ -2345,7 +2357,7 @@ function autoSaveStudentAttendance(selectedDate, studentId, status) {
 
 // Check all active students for 2+ consecutive absences and show WhatsApp alert modal
 function checkAndShowAbsenceAlerts(targetStudent = null, streakCount = 0) {
-  const activeStudents = state.students.filter(s => s.status === 'active');
+  const activeStudents = state.students.filter(s => s.status !== 'inactive');
   let alerts = [];
 
   if (targetStudent && streakCount >= 2) {
