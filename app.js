@@ -252,6 +252,15 @@ function registerServiceWorker() {
               }
             });
           });
+
+          // Automatically reload once when a new service worker version activates
+          let refreshing = false;
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (!refreshing) {
+              refreshing = true;
+              window.location.reload();
+            }
+          });
         })
         .catch((err) => {
           console.error('[Service Worker] Registration failed:', err);

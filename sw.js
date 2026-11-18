@@ -1,9 +1,11 @@
-const CACHE_NAME = 'nds-tracker-v4';
+const CACHE_NAME = 'nds-tracker-v5';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
   './style.css',
+  './style.css?v=4.1',
   './app.js',
+  './app.js?v=4.1',
   './html2pdf.bundle.min.js',
   './manifest.json',
   './logo.jpg',
@@ -42,38 +44,53 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event
+// Fetch Event (Network First for app.js and core assets so updates apply immediately)
 self.addEventListener('fetch', (event) => {
-  // Only handle HTTP/HTTPS, skip other schemes (like chrome-extension or file)
+  // Only handle HTTP/HTTPS
   if (!event.request.url.startsWith(self.location.origin)) {
     return;
   }
   
+  const url = new URL(event.request.url);
+  const isCoreAsset = url.pathname.endsWith('app.js') || 
+                      url.pathname.endsWith('index.html') || 
+                      url.pathname.endsWith('style.css') ||
+                      url.pathname === '/' ||
+                      url.pathname.endsWith('/NDS/') ||
+                      url.pathname.endsWith('/NDS');
+
+  if (isCoreAsset) {
+    // Network First: fetch latest from server, update cache, fallback to cache if offline
+    event.respondWith(
+      fetch(event.request).then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+        return networkResponse;
+      }).catch(() => {
+        return caches.match(event.request);
+      })
+    );
+    return;
+  }
+
+  // Cache First for static media (images, fonts, third-party libraries)
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        // Serve from cache but fetch fresh in background for next time (stale-while-revalidate)
-        fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, networkResponse);
-            });
-          }
-        }).catch(() => {/* Ignore network errors offline */});
-        
         return cachedResponse;
       }
-      
       return fetch(event.request).then((networkResponse) => {
         if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
           return networkResponse;
         }
-        
         const responseToCache = networkResponse.clone();
         caches.open(CACHE_NAME).then((cache) => {
           cache.put(event.request, responseToCache);
         });
-        
         return networkResponse;
       });
     })
