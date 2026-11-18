@@ -1087,18 +1087,6 @@ function syncBatchFilters() {
     batchFilter.appendChild(opt);
   });
 }
-  
-  batchFilter.innerHTML = '<option value="all">All Batches</option>';
-  batches.forEach(batch => {
-    const opt = document.createElement('option');
-    opt.value = batch;
-    opt.textContent = batch;
-    batchFilter.appendChild(opt);
-  });
-  
-  // Restore value if existed
-  batchFilter.value = currentVal;
-}
 
 // Student detail drawer panel popup
 function showStudentDetails(studentId) {

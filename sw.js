@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nds-tracker-v3';
+const CACHE_NAME = 'nds-tracker-v4';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
