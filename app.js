@@ -9,6 +9,7 @@ let state = {
   holidays: [],      // ['YYYY-MM-DD', ...]
   autoSunday: false, // auto-mark every Sunday as holiday
   sundayBatches: ["Bharathanatyam batch"], // batches with Sunday classes (Classical)
+  deletedStudentIds: [],
   batchPricing: {
     "Kids batch (batch 1)": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 },
     "Intermediate (batch 2)": { "1m": 2000, "3m": 5500, "6m": 10000, "12m": 19000 },
@@ -19,12 +20,13 @@ let state = {
   },
   gdrive: {
     clientId: '434441892966-203633m5fa73di5u7al48o4niilu1obh.apps.googleusercontent.com',
-    autoSync: false,
+    autoSync: true,
     accessToken: '',
     tokenExpiry: 0,
     lastSyncTime: null,
     fileId: null,
-    userEmail: ''
+    userEmail: '',
+    lockedEmail: ''
   }
 };
 
@@ -37,6 +39,7 @@ const DEFAULT_STATE = {
   holidays: [],
   autoSunday: false,
   sundayBatches: ["Bharathanatyam batch"],
+  deletedStudentIds: [],
   batchPricing: {
     "Kids batch (batch 1)": { "1m": 1500, "3m": 4000, "6m": 7500, "12m": 14000 },
     "Intermediate (batch 2)": { "1m": 2000, "3m": 5500, "6m": 10000, "12m": 19000 },
@@ -47,12 +50,13 @@ const DEFAULT_STATE = {
   },
   gdrive: {
     clientId: '434441892966-203633m5fa73di5u7al48o4niilu1obh.apps.googleusercontent.com',
-    autoSync: false,
+    autoSync: true,
     accessToken: '',
     tokenExpiry: 0,
     lastSyncTime: null,
     fileId: null,
-    userEmail: ''
+    userEmail: '',
+    lockedEmail: ''
   }
 };
 
@@ -123,14 +127,16 @@ function initApp() {
       state = JSON.parse(storedData);
       // Ensure arrays and new fields exist
       state.students = state.students || [];
-      // Ensure all students have a status (default active)
+      // Ensure all students have a status and updatedAt
       state.students.forEach(s => {
         if (!s.status) s.status = 'active';
+        if (!s.updatedAt) s.updatedAt = s.admissionDate ? new Date(s.admissionDate).toISOString() : new Date().toISOString();
       });
       state.payments = state.payments || [];
       state.masterName = state.masterName || '';
       state.attendance = state.attendance || [];
       state.holidays = state.holidays || [];
+      state.deletedStudentIds = state.deletedStudentIds || [];
       state.autoSunday = state.autoSunday || false;
       if (!Array.isArray(state.sundayBatches) || state.sundayBatches.length === 0) {
         state.sundayBatches = ["Bharathanatyam batch"];
@@ -141,6 +147,9 @@ function initApp() {
       }
       if (!state.gdrive) state.gdrive = { ...DEFAULT_STATE.gdrive };
       if (!state.gdrive.clientId) state.gdrive.clientId = DEFAULT_STATE.gdrive.clientId;
+      if (state.gdrive.userEmail && !state.gdrive.lockedEmail) {
+        state.gdrive.lockedEmail = state.gdrive.userEmail;
+      }
     } catch (e) {
       console.error('Error parsing stored database, resetting to default.', e);
       state = { ...DEFAULT_STATE };
@@ -350,8 +359,15 @@ function initPullToRefresh() {
     if (dampenedDistance >= PULL_THRESHOLD) {
       // Pin at the top showing the spinner
       pullIndicator.style.transform = 'translateY(0px)';
-      refreshText.textContent = 'Clearing cache & reloading...';
-      triggerHardRefresh();
+      if (isGoogleDriveConnected()) {
+        refreshText.textContent = 'Syncing cloud & updating cache...';
+        syncWithGoogleDrive({ silent: true }).finally(() => {
+          triggerHardRefresh();
+        });
+      } else {
+        refreshText.textContent = 'Clearing cache & reloading...';
+        triggerHardRefresh();
+      }
     } else {
       // Slip back up
       pullIndicator.style.transform = 'translateY(-100%)';
@@ -889,32 +905,86 @@ function renderStudents() {
   const searchInput = document.getElementById('student-search-input');
   const batchFilter = document.getElementById('student-batch-filter');
   const statusFilter = document.getElementById('student-status-filter');
+  const feeFilter = document.getElementById('student-fee-filter');
+  const sortFilter = document.getElementById('student-sort-filter');
   
   if (!gridContainer) return;
   
-  const query = searchInput.value.toLowerCase().trim();
-  const selectedBatch = batchFilter.value;
-  const selectedStatus = statusFilter.value;
+  const query = (searchInput ? searchInput.value : '').toLowerCase().trim();
+  const selectedBatch = batchFilter ? batchFilter.value : 'all';
+  const selectedStatus = statusFilter ? statusFilter.value : 'active';
+  const selectedFee = feeFilter ? feeFilter.value : 'all';
+  const selectedSort = sortFilter ? sortFilter.value : 'name-asc';
   
-  // Filter active/inactive
-  let filtered = state.students;
-  if (selectedStatus !== 'all') {
-    filtered = filtered.filter(s => s.status === selectedStatus);
+  // 1. Filter active / inactive
+  let filtered = state.students || [];
+  if (selectedStatus === 'active') {
+    filtered = filtered.filter(s => s.status !== 'inactive');
+  } else if (selectedStatus === 'inactive') {
+    filtered = filtered.filter(s => s.status === 'inactive');
   }
   
-  // Filter batch
+  // 2. Filter batch
   if (selectedBatch !== 'all') {
     filtered = filtered.filter(s => s.batch === selectedBatch);
   }
+
+  // 3. Pre-calculate membership fee status for each student
+  const studentMetaMap = new Map();
+  filtered.forEach(s => {
+    studentMetaMap.set(s.id, getStudentMembershipStatus(s));
+  });
+
+  // 4. Filter fee status (Paid vs Pending/Due)
+  if (selectedFee === 'pending') {
+    filtered = filtered.filter(s => {
+      const mem = studentMetaMap.get(s.id);
+      return mem && (mem.status === 'expired' || mem.status === 'unpaid');
+    });
+  } else if (selectedFee === 'paid') {
+    filtered = filtered.filter(s => {
+      const mem = studentMetaMap.get(s.id);
+      return mem && mem.status === 'paid';
+    });
+  }
   
-  // Filter search query
+  // 5. Filter search query
   if (query) {
     filtered = filtered.filter(s => {
-      return s.name.toLowerCase().includes(query) || 
-             s.phone.includes(query) || 
+      return (s.name || '').toLowerCase().includes(query) || 
+             (s.phone || '').includes(query) || 
              (s.parentName && s.parentName.toLowerCase().includes(query));
     });
   }
+
+  // 6. Sort students
+  filtered.sort((a, b) => {
+    const memA = studentMetaMap.get(a.id);
+    const memB = studentMetaMap.get(b.id);
+
+    if (selectedSort === 'fee-pending-first') {
+      const isPendA = memA && (memA.status === 'expired' || memA.status === 'unpaid');
+      const isPendB = memB && (memB.status === 'expired' || memB.status === 'unpaid');
+      if (isPendA && !isPendB) return -1;
+      if (!isPendA && isPendB) return 1;
+      if (isPendA && isPendB) {
+        return (memB.daysOverdue || 0) - (memA.daysOverdue || 0);
+      }
+      return (a.name || '').localeCompare(b.name || '');
+    } else if (selectedSort === 'fee-paid-first') {
+      const isPaidA = memA && memA.status === 'paid';
+      const isPaidB = memB && memB.status === 'paid';
+      if (isPaidA && !isPaidB) return -1;
+      if (!isPaidA && isPaidB) return 1;
+      return (a.name || '').localeCompare(b.name || '');
+    } else if (selectedSort === 'name-desc') {
+      return (b.name || '').localeCompare(a.name || '');
+    } else if (selectedSort === 'admission-newest') {
+      return (b.admissionDate || '').localeCompare(a.admissionDate || '');
+    }
+    // Default: name-asc
+    return (a.name || '').localeCompare(b.name || '');
+  });
   
   // Sync Batch Filter Dropdown options with unique existing batches
   syncBatchFilters();
@@ -925,34 +995,50 @@ function renderStudents() {
     gridContainer.innerHTML = `
       <div class="empty-state" style="grid-column: 1 / -1;">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><line x1="23" y1="11" x2="17" y2="11"></line></svg>
-        <p>No students found matching filters.</p>
+        <p>No students found matching your filters.</p>
       </div>
     `;
     return;
   }
-  
-  const currentMonthStr = new Date().toISOString().slice(0, 7); // YYYY-MM
   
   filtered.forEach(student => {
     const card = document.createElement('div');
     card.className = 'student-card glass-card animated-fade-in';
     card.addEventListener('click', () => showStudentDetails(student.id));
     
-    // Check if paid this month
-    const paidThisMonth = state.payments.some(p => p.studentId === student.id && p.monthPaidFor === currentMonthStr);
-    const statusDotClass = paidThisMonth ? 'paid' : 'pending';
+    const memStatus = studentMetaMap.get(student.id) || getStudentMembershipStatus(student);
+    const isStudentActive = student.status !== 'inactive';
+    const isPaid = isStudentActive && memStatus.status === 'paid';
+    const isPending = isStudentActive && (memStatus.status === 'expired' || memStatus.status === 'unpaid');
     
-    const initials = student.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-    const isStudentActive = student.status === 'active';
+    const statusDotClass = isPaid ? 'paid' : (isPending ? 'pending' : '');
+    
+    const initials = (student.name || '').split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
     const avatarContent = student.photo
       ? `<img src="${student.photo}" alt="${student.name}" style="width:100%; height:100%; object-fit:cover; border-radius:50%;">`
       : `<span class="student-avatar-letter">${initials}</span>`;
     
+    // Clear, intuitive Fee Status Sign
+    let feeSignHtml = '';
+    if (!isStudentActive) {
+      feeSignHtml = `<span class="fee-status-badge paused" title="Class Paused">PAUSED</span>`;
+    } else if (isPaid) {
+      feeSignHtml = `<span class="fee-status-badge paid" title="Fees Paid / Membership Active">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        PAID
+      </span>`;
+    } else {
+      const overdueLabel = memStatus.daysOverdue > 0 ? `DUE (${memStatus.daysOverdue}d)` : 'PENDING';
+      feeSignHtml = `<span class="fee-status-badge pending" title="Fees Due / Pending">
+        ⚠️ ${overdueLabel}
+      </span>`;
+    }
+
     card.innerHTML = `
       <div class="student-card-left">
         <div class="student-avatar ${isStudentActive ? 'active-student' : ''}">
           ${avatarContent}
-          ${isStudentActive ? `<div class="status-dot ${statusDotClass}"></div>` : ''}
+          ${isStudentActive ? `<div class="status-dot ${statusDotClass}" title="${isPaid ? 'Fees Paid' : 'Fees Due / Pending'}"></div>` : ''}
         </div>
         <div class="student-card-details">
           <div class="student-name-row">
@@ -965,7 +1051,8 @@ function renderStudents() {
       </div>
       <div class="student-card-right" style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
         <span class="student-fee-val">₹${parseInt(student.monthlyFee || 0).toLocaleString('en-IN')}</span>
-        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openStudentLatestInvoice('${student.id}')" title="Download Student Invoice PDF" style="padding: 2px 8px; font-size: 0.68rem; border-color: rgba(227,28,37,0.35); display: flex; align-items: center; gap: 4px; color: var(--brand-white);">
+        ${feeSignHtml}
+        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openStudentLatestInvoice('${student.id}')" title="Download Student Invoice PDF" style="padding: 2px 8px; font-size: 0.68rem; border-color: rgba(227,28,37,0.35); display: flex; align-items: center; gap: 4px; color: var(--brand-white); margin-top: 2px;">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           PDF
         </button>
@@ -983,6 +1070,23 @@ function syncBatchFilters() {
   
   // Extract unique batches
   const batches = [...new Set(state.students.map(s => s.batch).filter(Boolean))];
+
+  // Avoid unnecessary DOM wiping if options have not changed
+  const existingValues = Array.from(batchFilter.options).map(o => o.value);
+  const neededValues = ['all', ...batches];
+  if (existingValues.length === neededValues.length && existingValues.every((v, i) => v === neededValues[i])) {
+    return;
+  }
+  
+  batchFilter.innerHTML = '<option value="all">All Batches</option>';
+  batches.forEach(batch => {
+    const opt = document.createElement('option');
+    opt.value = batch;
+    opt.textContent = batch;
+    if (batch === currentVal) opt.selected = true;
+    batchFilter.appendChild(opt);
+  });
+}
   
   batchFilter.innerHTML = '<option value="all">All Batches</option>';
   batches.forEach(batch => {
@@ -1367,6 +1471,12 @@ function initFormsAndModals() {
   const statusFilter = document.getElementById('student-status-filter');
   if (statusFilter) statusFilter.addEventListener('change', renderStudents);
 
+  const feeFilter = document.getElementById('student-fee-filter');
+  if (feeFilter) feeFilter.addEventListener('change', renderStudents);
+
+  const sortFilter = document.getElementById('student-sort-filter');
+  if (sortFilter) sortFilter.addEventListener('change', renderStudents);
+
   function updateStudentInitialFeePreview() {
     const adm = parseInt(document.getElementById('student-admission-fee')?.value || 0);
     const fee = parseInt(document.getElementById('student-fee')?.value || 0);
@@ -1524,6 +1634,7 @@ function initFormsAndModals() {
       
       if (!studentId) {
         // Create new student
+        const nowIso = new Date().toISOString();
         const newStudent = {
           id: 'std_' + Date.now(),
           name,
@@ -1534,7 +1645,9 @@ function initFormsAndModals() {
           monthlyFee,
           admissionDate,
           photo,
-          status: 'active'
+          status: 'active',
+          createdAt: nowIso,
+          updatedAt: nowIso
         };
         state.students.push(newStudent);
         showToast(`${name} admitted successfully!`, 'success');
@@ -1563,7 +1676,8 @@ function initFormsAndModals() {
             monthlyFee,
             admissionDate,
             photo,
-            status
+            status,
+            updatedAt: new Date().toISOString()
           };
           showToast(`${name} profile updated!`, 'success');
         }
@@ -1605,7 +1719,8 @@ function initFormsAndModals() {
           endDate,
           datePaid,
           method,
-          remarks
+          remarks,
+          createdAt: new Date().toISOString()
         };
         state.payments.push(newPayment);
         
@@ -1638,6 +1753,11 @@ function initFormsAndModals() {
       
       const doubleConfirm = confirm(`WARNING: Are you sure you want to delete ${student.name}? This will permanently delete their class registration and ALL past payment history logs!`);
       if (doubleConfirm) {
+        // Track deleted student ID for multi-device sync
+        state.deletedStudentIds = state.deletedStudentIds || [];
+        if (!state.deletedStudentIds.includes(selectedStudentId)) {
+          state.deletedStudentIds.push(selectedStudentId);
+        }
         // Delete student
         state.students = state.students.filter(s => s.id !== selectedStudentId);
         // Delete associated payments
@@ -2560,24 +2680,180 @@ window.removeHoliday = function(dateStr) {
   showToast('Holiday removed', 'success');
 };
 
-// ==================== GOOGLE DRIVE CLOUD BACKUP MODULE ====================
+// ==================== GOOGLE DRIVE CLOUD SYNC MODULE ====================
 
 const DEFAULT_GDRIVE_CLIENT_ID = '434441892966-203633m5fa73di5u7al48o4niilu1obh.apps.googleusercontent.com';
 const GDRIVE_BACKUP_FILENAME = 'NDS_Database_Backup.json';
 let gdriveTokenClient = null;
 let autoSyncTimeout = null;
+let isSyncInProgress = false;
+
+// Robust Bidirectional Database Merge (Prevents Any Data Loss Across Multiple Devices)
+function mergeDatabaseStates(local, remote) {
+  if (!remote || typeof remote !== 'object') return local;
+  if (!local || typeof local !== 'object') return remote;
+
+  // Merge deleted student IDs list so deleted students don't resurrect
+  const mergedDeletedIds = [
+    ...new Set([
+      ...(Array.isArray(local.deletedStudentIds) ? local.deletedStudentIds : []),
+      ...(Array.isArray(remote.deletedStudentIds) ? remote.deletedStudentIds : [])
+    ])
+  ];
+
+  // 1. Merge Students
+  const mergedStudentsMap = new Map();
+  const getStudentTime = (s) => {
+    if (s.updatedAt) return new Date(s.updatedAt).getTime();
+    if (s.createdAt) return new Date(s.createdAt).getTime();
+    if (s.admissionDate) return new Date(s.admissionDate).getTime();
+    return 0;
+  };
+
+  (local.students || []).forEach(s => {
+    if (s && s.id && !mergedDeletedIds.includes(s.id)) {
+      mergedStudentsMap.set(s.id, { ...s });
+    }
+  });
+
+  (remote.students || []).forEach(rem => {
+    if (!rem || !rem.id || mergedDeletedIds.includes(rem.id)) return;
+    if (!mergedStudentsMap.has(rem.id)) {
+      // Remote student not in local -> include them!
+      mergedStudentsMap.set(rem.id, { ...rem });
+    } else {
+      // Merge records: take the latest or most detailed
+      const loc = mergedStudentsMap.get(rem.id);
+      const remTime = getStudentTime(rem);
+      const locTime = getStudentTime(loc);
+      const primary = remTime >= locTime ? rem : loc;
+      const secondary = remTime >= locTime ? loc : rem;
+
+      mergedStudentsMap.set(rem.id, {
+        ...secondary,
+        ...primary,
+        name: primary.name || secondary.name,
+        phone: primary.phone || secondary.phone,
+        batch: primary.batch || secondary.batch,
+        monthlyFee: primary.monthlyFee !== undefined && primary.monthlyFee !== '' ? primary.monthlyFee : secondary.monthlyFee,
+        admissionFee: primary.admissionFee !== undefined && primary.admissionFee !== '' ? primary.admissionFee : secondary.admissionFee,
+        admissionDate: primary.admissionDate || secondary.admissionDate,
+        photo: primary.photo || secondary.photo || '',
+        parentName: primary.parentName || secondary.parentName || '',
+        status: primary.status || secondary.status || 'active',
+        updatedAt: new Date(Math.max(remTime, locTime, Date.now())).toISOString()
+      });
+    }
+  });
+
+  const mergedStudents = Array.from(mergedStudentsMap.values());
+
+  // 2. Merge Payments (Never delete or drop past payments from either device)
+  const mergedPaymentsMap = new Map();
+  const paymentKey = (p) => p.id || `${p.studentId}_${p.datePaid}_${p.amount}_${p.monthPaidFor || ''}_${p.startDate || ''}_${p.endDate || ''}`;
+
+  (local.payments || []).forEach(p => {
+    if (p) {
+      const key = paymentKey(p);
+      mergedPaymentsMap.set(key, { ...p, id: p.id || ('pay_' + Math.random().toString(36).substr(2, 9)) });
+    }
+  });
+
+  (remote.payments || []).forEach(p => {
+    if (p) {
+      const key = paymentKey(p);
+      if (!mergedPaymentsMap.has(key)) {
+        mergedPaymentsMap.set(key, { ...p, id: p.id || ('pay_' + Math.random().toString(36).substr(2, 9)) });
+      } else {
+        const existing = mergedPaymentsMap.get(key);
+        mergedPaymentsMap.set(key, {
+          ...existing,
+          ...p,
+          invoiceNumber: p.invoiceNumber || existing.invoiceNumber,
+          admissionFeePaid: p.admissionFeePaid !== undefined ? p.admissionFeePaid : existing.admissionFeePaid
+        });
+      }
+    }
+  });
+
+  const mergedPayments = Array.from(mergedPaymentsMap.values()).sort((a, b) => {
+    return (b.datePaid || '').localeCompare(a.datePaid || '');
+  });
+
+  // 3. Merge Attendance (Keyed by date and studentId)
+  const mergedAttendanceMap = new Map();
+  const attKey = (a) => `${a.date}_${a.studentId}`;
+
+  (local.attendance || []).forEach(a => {
+    if (a && a.date && a.studentId) {
+      mergedAttendanceMap.set(attKey(a), { ...a });
+    }
+  });
+
+  (remote.attendance || []).forEach(a => {
+    if (a && a.date && a.studentId) {
+      const key = attKey(a);
+      if (!mergedAttendanceMap.has(key)) {
+        mergedAttendanceMap.set(key, { ...a });
+      } else {
+        const locAtt = mergedAttendanceMap.get(key);
+        mergedAttendanceMap.set(key, {
+          date: a.date,
+          studentId: a.studentId,
+          status: a.status || locAtt.status
+        });
+      }
+    }
+  });
+
+  const mergedAttendance = Array.from(mergedAttendanceMap.values());
+
+  // 4. Merge Holidays & Sunday Batches
+  const mergedHolidays = [...new Set([...(local.holidays || []), ...(remote.holidays || [])])].sort();
+  const mergedSundayBatches = [...new Set([...(local.sundayBatches || ["Bharathanatyam batch"]), ...(remote.sundayBatches || [])])].filter(Boolean);
+
+  // 5. Batch Pricing
+  const mergedBatchPricing = {
+    ...(local.batchPricing || DEFAULT_STATE.batchPricing),
+    ...(remote.batchPricing || {})
+  };
+
+  // 6. Master Name & Auto Sunday
+  const masterName = remote.masterName || local.masterName || '';
+  const autoSunday = remote.autoSunday !== undefined ? remote.autoSunday : (local.autoSunday || false);
+
+  // 7. GDrive metadata
+  const gdrive = {
+    ...(local.gdrive || DEFAULT_STATE.gdrive),
+    lastSyncTime: new Date().toISOString()
+  };
+
+  return {
+    masterName,
+    students: mergedStudents,
+    payments: mergedPayments,
+    attendance: mergedAttendance,
+    holidays: mergedHolidays,
+    autoSunday,
+    sundayBatches: mergedSundayBatches.length > 0 ? mergedSundayBatches : ["Bharathanatyam batch"],
+    deletedStudentIds: mergedDeletedIds,
+    batchPricing: mergedBatchPricing,
+    gdrive
+  };
+}
 
 // Initialize Google Drive UI and events
 function initGoogleDrive() {
   if (!state.gdrive) {
     state.gdrive = {
       clientId: DEFAULT_GDRIVE_CLIENT_ID,
-      autoSync: false,
+      autoSync: true,
       accessToken: '',
       tokenExpiry: 0,
       lastSyncTime: null,
       fileId: null,
-      userEmail: ''
+      userEmail: '',
+      lockedEmail: ''
     };
   } else if (!state.gdrive.clientId) {
     state.gdrive.clientId = DEFAULT_GDRIVE_CLIENT_ID;
@@ -2586,8 +2862,9 @@ function initGoogleDrive() {
   const autoSyncToggle = document.getElementById('gdrive-auto-sync-toggle');
   const connectBtn = document.getElementById('btn-gdrive-connect');
   const disconnectBtn = document.getElementById('btn-gdrive-disconnect');
-  const backupNowBtn = document.getElementById('btn-gdrive-backup-now');
-  const restoreNowBtn = document.getElementById('btn-gdrive-restore-now');
+  const syncNowBtn = document.getElementById('btn-gdrive-sync-now');
+  const historyBtn = document.getElementById('btn-gdrive-history');
+  const forceBackupBtn = document.getElementById('btn-gdrive-force-backup');
 
   if (autoSyncToggle) {
     autoSyncToggle.checked = !!state.gdrive.autoSync;
@@ -2595,15 +2872,16 @@ function initGoogleDrive() {
       state.gdrive.autoSync = autoSyncToggle.checked;
       saveState();
       if (state.gdrive.autoSync) {
-        showToast('Auto-backup to Google Drive enabled', 'success');
+        showToast('Auto-sync across devices enabled', 'success');
         if (isGoogleDriveConnected()) {
-          uploadToGoogleDrive(false);
+          syncWithGoogleDrive({ isManual: false });
         } else {
           showToast('Connect Google Drive to start syncing', 'warning');
         }
       } else {
-        showToast('Auto-backup disabled', 'info');
+        showToast('Auto-sync disabled', 'info');
       }
+      updateGoogleDriveUI();
     });
   }
 
@@ -2615,15 +2893,31 @@ function initGoogleDrive() {
     disconnectBtn.addEventListener('click', disconnectGoogleDrive);
   }
 
-  if (backupNowBtn) {
-    backupNowBtn.addEventListener('click', () => uploadToGoogleDrive(true));
+  if (syncNowBtn) {
+    syncNowBtn.addEventListener('click', () => syncWithGoogleDrive({ isManual: true }));
   }
 
-  if (restoreNowBtn) {
-    restoreNowBtn.addEventListener('click', restoreFromGoogleDrive);
+  if (historyBtn) {
+    historyBtn.addEventListener('click', openCloudHistoryModal);
+  }
+
+  if (forceBackupBtn) {
+    forceBackupBtn.addEventListener('click', forceUploadToGoogleDrive);
   }
 
   updateGoogleDriveUI();
+
+  // If connected on startup, automatically perform background sync to fetch updates from other devices
+  if (isGoogleDriveConnected()) {
+    setTimeout(() => {
+      syncWithGoogleDrive({ silent: true });
+    }, 1500);
+  } else if (state.gdrive && (state.gdrive.lockedEmail || state.gdrive.userEmail)) {
+    // Attempt silent token refresh in background
+    setTimeout(() => {
+      requestSilentTokenRefresh();
+    }, 2000);
+  }
 }
 
 function isGoogleDriveConnected() {
@@ -2638,13 +2932,18 @@ function updateGoogleDriveUI() {
   const accountEmail = document.getElementById('gdrive-account-email');
   const lastSyncText = document.getElementById('gdrive-last-sync-text');
   const autoSyncToggle = document.getElementById('gdrive-auto-sync-toggle');
+  const syncStatusIndicator = document.getElementById('gdrive-sync-status-indicator');
 
   const connected = isGoogleDriveConnected();
+  const hasAccount = !!(state.gdrive && (state.gdrive.lockedEmail || state.gdrive.userEmail));
 
   if (statusBadge) {
     if (connected) {
-      statusBadge.textContent = 'Connected';
+      statusBadge.textContent = '🔒 Locked & Synced';
       statusBadge.className = 'badge badge-success';
+    } else if (hasAccount) {
+      statusBadge.textContent = 'Session Expired (Tap to Reconnect)';
+      statusBadge.className = 'badge badge-warning';
     } else {
       statusBadge.textContent = 'Disconnected';
       statusBadge.className = 'badge badge-outline';
@@ -2653,10 +2952,21 @@ function updateGoogleDriveUI() {
 
   if (connectBtn) {
     connectBtn.style.display = connected ? 'none' : 'flex';
+    if (!connected && hasAccount) {
+      connectBtn.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M21.35 11.1h-9.17v2.98h5.36c-.46 2.2-2.3 3.6-5.36 3.6-3.32 0-6.02-2.7-6.02-6.02s2.7-6.02 6.02-6.02c1.46 0 2.78.52 3.82 1.48l2.25-2.25C16.8 3.52 14.54 2.7 12.18 2.7 7.07 2.7 2.92 6.85 2.92 11.96s4.15 9.26 9.26 9.26c5.34 0 8.87-3.75 8.87-9.03 0-.6-.06-1.19-.18-1.73z"/></svg>
+        Re-sync with ${state.gdrive.lockedEmail || state.gdrive.userEmail}
+      `;
+    } else {
+      connectBtn.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M21.35 11.1h-9.17v2.98h5.36c-.46 2.2-2.3 3.6-5.36 3.6-3.32 0-6.02-2.7-6.02-6.02s2.7-6.02 6.02-6.02c1.46 0 2.78.52 3.82 1.48l2.25-2.25C16.8 3.52 14.54 2.7 12.18 2.7 7.07 2.7 2.92 6.85 2.92 11.96s4.15 9.26 9.26 9.26c5.34 0 8.87-3.75 8.87-9.03 0-.6-.06-1.19-.18-1.73z"/></svg>
+        Connect with Google Drive
+      `;
+    }
   }
 
   if (connectedDetails) {
-    connectedDetails.style.display = connected ? 'block' : 'none';
+    connectedDetails.style.display = (connected || hasAccount) ? 'block' : 'none';
   }
 
   if (actionsRow) {
@@ -2664,7 +2974,7 @@ function updateGoogleDriveUI() {
   }
 
   if (accountEmail && state.gdrive) {
-    accountEmail.textContent = state.gdrive.userEmail || 'Google Account';
+    accountEmail.textContent = state.gdrive.lockedEmail || state.gdrive.userEmail || '-';
   }
 
   if (lastSyncText && state.gdrive) {
@@ -2682,14 +2992,47 @@ function updateGoogleDriveUI() {
     }
   }
 
+  if (syncStatusIndicator && state.gdrive) {
+    syncStatusIndicator.textContent = state.gdrive.autoSync ? 'Auto-sync active' : 'Manual sync only';
+  }
+
   if (autoSyncToggle && state.gdrive) {
     autoSyncToggle.checked = !!state.gdrive.autoSync;
+  }
+}
+
+// Request Silent Token Refresh in Background
+function requestSilentTokenRefresh() {
+  if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2) return;
+  const clientId = (state.gdrive && state.gdrive.clientId) || DEFAULT_GDRIVE_CLIENT_ID;
+  const emailHint = (state.gdrive && (state.gdrive.lockedEmail || state.gdrive.userEmail)) || '';
+  if (!emailHint) return;
+
+  try {
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email',
+      hint: emailHint,
+      callback: (tokenResponse) => {
+        if (tokenResponse && tokenResponse.access_token) {
+          state.gdrive.accessToken = tokenResponse.access_token;
+          state.gdrive.tokenExpiry = Date.now() + (parseInt(tokenResponse.expires_in || 3600) - 60) * 1000;
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
+          updateGoogleDriveUI();
+          syncWithGoogleDrive({ silent: true });
+        }
+      }
+    });
+    client.requestAccessToken({ prompt: '' });
+  } catch (e) {
+    console.warn('Silent token refresh error:', e);
   }
 }
 
 // Trigger Google OAuth 2.0 Token Flow via Google Identity Services
 function connectGoogleDrive(triggerInitialSync = true) {
   const clientId = (state.gdrive && state.gdrive.clientId) || DEFAULT_GDRIVE_CLIENT_ID;
+  const emailHint = (state.gdrive && (state.gdrive.lockedEmail || state.gdrive.userEmail)) || '';
 
   if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2) {
     showToast('Google Identity Services loading. Please retry in a moment.', 'warning');
@@ -2697,7 +3040,7 @@ function connectGoogleDrive(triggerInitialSync = true) {
   }
 
   try {
-    gdriveTokenClient = google.accounts.oauth2.initTokenClient({
+    const config = {
       client_id: clientId,
       scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email',
       callback: async (tokenResponse) => {
@@ -2712,30 +3055,50 @@ function connectGoogleDrive(triggerInitialSync = true) {
             });
             if (userRes.ok) {
               const userData = await userRes.json();
-              state.gdrive.userEmail = userData.email || '';
+              const authenticatedEmail = userData.email || '';
+
+              // Check if locked to an email
+              if (state.gdrive.lockedEmail && authenticatedEmail && state.gdrive.lockedEmail !== authenticatedEmail) {
+                const switchConfirm = confirm(
+                  `This studio database is locked to ${state.gdrive.lockedEmail}.\n\nYou authenticated as ${authenticatedEmail}.\n\nDo you want to switch to this new account?`
+                );
+                if (!switchConfirm) {
+                  disconnectGoogleDrive();
+                  return;
+                }
+              }
+
+              state.gdrive.userEmail = authenticatedEmail;
+              state.gdrive.lockedEmail = authenticatedEmail;
             }
           } catch (e) {
             console.warn('Could not fetch user email', e);
           }
 
-          saveState();
+          state.gdrive.autoSync = true;
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
           updateGoogleDriveUI();
-          showToast(`Connected to Google Drive (${state.gdrive.userEmail || 'Success'})!`, 'success');
+          showToast(`Connected & locked to ${state.gdrive.lockedEmail || 'Google Drive'}!`, 'success');
 
-          // Immediately sync current existing data to Google Drive
+          // Immediately perform incremental bidirectional sync
           if (triggerInitialSync) {
-            uploadToGoogleDrive(false);
+            await syncWithGoogleDrive({ isManual: true });
           }
         } else {
-          showToast('Google authentication failed or cancelled', 'danger');
+          showToast('Google authentication cancelled or failed', 'danger');
         }
       },
       error_callback: (err) => {
         console.error('Google OAuth error:', err);
-        showToast('Google authentication error: ' + (err.message || 'Please check Client ID'), 'danger');
+        showToast('Google authentication error: ' + (err.message || 'Please check connection'), 'danger');
       }
-    });
+    };
 
+    if (emailHint) {
+      config.hint = emailHint;
+    }
+
+    gdriveTokenClient = google.accounts.oauth2.initTokenClient(config);
     gdriveTokenClient.requestAccessToken({ prompt: '' });
   } catch (err) {
     console.error('Failed to init Google OAuth token client', err);
@@ -2745,6 +3108,11 @@ function connectGoogleDrive(triggerInitialSync = true) {
 
 // Disconnect Google Drive
 function disconnectGoogleDrive() {
+  const confirmSignOut = confirm(
+    'Are you sure you want to sign out from Google Drive on this device? Your local database on this device will be preserved.'
+  );
+  if (!confirmSignOut) return;
+
   if (state.gdrive && state.gdrive.accessToken) {
     try {
       if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
@@ -2757,15 +3125,21 @@ function disconnectGoogleDrive() {
     state.gdrive.accessToken = '';
     state.gdrive.tokenExpiry = 0;
     state.gdrive.userEmail = '';
+    state.gdrive.lockedEmail = '';
   }
 
   saveState();
   updateGoogleDriveUI();
-  showToast('Disconnected from Google Drive', 'info');
+  showToast('Signed out from Google Drive on this device', 'info');
 }
 
-// Upload current NDS state JSON into Google Drive
-async function uploadToGoogleDrive(isManual = false) {
+// Incremental Bidirectional Sync with Google Drive (Never destroys data)
+async function syncWithGoogleDrive({ isManual = false, silent = false, forceUpload = false } = {}) {
+  if (isSyncInProgress) {
+    if (isManual && !silent) showToast('Sync already in progress...', 'info');
+    return;
+  }
+
   if (!isGoogleDriveConnected()) {
     if (isManual) {
       connectGoogleDrive(true);
@@ -2773,35 +3147,65 @@ async function uploadToGoogleDrive(isManual = false) {
     return;
   }
 
-  const token = state.gdrive.accessToken;
-  const backupPayload = JSON.stringify(state, null, 2);
-
-  if (isManual) {
-    showToast('Uploading backup to Google Drive...', 'info');
-  }
+  isSyncInProgress = true;
+  const syncIcon = document.getElementById('gdrive-sync-icon');
+  if (syncIcon) syncIcon.classList.add('sync-spinning');
+  if (isManual && !silent) showToast('Syncing with Google Drive...', 'info');
 
   try {
-    // 1. Search if NDS_Database_Backup.json already exists in user's Drive
-    let fileId = state.gdrive.fileId;
-    if (!fileId) {
-      const searchRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q=name='${GDRIVE_BACKUP_FILENAME}' and trashed=false&fields=files(id,name)&spaces=drive`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+    const token = state.gdrive.accessToken;
 
-      if (searchRes.ok) {
-        const searchData = await searchRes.json();
-        if (searchData.files && searchData.files.length > 0) {
-          fileId = searchData.files[0].id;
-          state.gdrive.fileId = fileId;
-        }
+    // 1. Search for existing backup file on Drive
+    let fileId = state.gdrive.fileId;
+    let fileFound = false;
+
+    const searchRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=name='${GDRIVE_BACKUP_FILENAME}' and trashed=false&fields=files(id,name,modifiedTime,size)&spaces=drive`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    if (searchRes.ok) {
+      const searchData = await searchRes.json();
+      if (searchData.files && searchData.files.length > 0) {
+        fileId = searchData.files[0].id;
+        state.gdrive.fileId = fileId;
+        fileFound = true;
       }
+    } else if (searchRes.status === 401) {
+      handleGoogleSessionExpired(isManual);
+      return;
     }
 
-    let uploadRes;
-    if (fileId) {
-      // Update existing file content
-      uploadRes = await fetch(
+    if (fileFound && fileId && !forceUpload) {
+      // 2. Fetch existing cloud data and perform bidirectional merge
+      try {
+        const downloadRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (downloadRes.ok) {
+          const remoteData = await downloadRes.json();
+          if (remoteData && (Array.isArray(remoteData.students) || Array.isArray(remoteData.payments))) {
+            const beforeStuCount = (state.students || []).length;
+            const beforePayCount = (state.payments || []).length;
+
+            state = mergeDatabaseStates(state, remoteData);
+
+            const addedStu = state.students.length - beforeStuCount;
+            const addedPay = state.payments.length - beforePayCount;
+            if (isManual && (addedStu > 0 || addedPay > 0)) {
+              console.log(`[Google Drive Sync] Merged +${addedStu} students, +${addedPay} payments from cloud.`);
+            }
+          }
+        }
+      } catch (dlErr) {
+        console.warn('Could not download existing cloud backup to merge, proceeding to push:', dlErr);
+      }
+
+      // 3. Upload merged state back to Google Drive (PATCH)
+      const payload = JSON.stringify(state, null, 2);
+      const patchRes = await fetch(
         `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
         {
           method: 'PATCH',
@@ -2809,11 +3213,36 @@ async function uploadToGoogleDrive(isManual = false) {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json'
           },
-          body: backupPayload
+          body: payload
+        }
+      );
+
+      if (!patchRes.ok) {
+        if (patchRes.status === 401) {
+          handleGoogleSessionExpired(isManual);
+          return;
+        }
+        const errText = await patchRes.text();
+        console.error('Google Drive PATCH failed', errText);
+        if (isManual && !silent) showToast('Cloud sync failed. Please try again.', 'danger');
+        return;
+      }
+    } else if (fileFound && fileId && forceUpload) {
+      // Force Upload: Overwrite cloud file with local data
+      const payload = JSON.stringify(state, null, 2);
+      await fetch(
+        `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: payload
         }
       );
     } else {
-      // Create new backup file in Google Drive
+      // 4. Create new backup file in Google Drive
       const metadata = {
         name: GDRIVE_BACKUP_FILENAME,
         mimeType: 'application/json',
@@ -2830,10 +3259,10 @@ async function uploadToGoogleDrive(isManual = false) {
         JSON.stringify(metadata) +
         delimiter +
         'Content-Type: application/json\r\n\r\n' +
-        backupPayload +
+        JSON.stringify(state, null, 2) +
         closeDelim;
 
-      uploadRes = await fetch(
+      const uploadRes = await fetch(
         'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
         {
           method: 'POST',
@@ -2844,115 +3273,208 @@ async function uploadToGoogleDrive(isManual = false) {
           body: multipartRequestBody
         }
       );
+
+      if (uploadRes.ok) {
+        const createData = await uploadRes.json();
+        state.gdrive.fileId = createData.id;
+      }
     }
 
-    if (uploadRes.ok) {
-      const data = await uploadRes.json();
-      state.gdrive.fileId = data.id || fileId;
-      state.gdrive.lastSyncTime = new Date().toISOString();
-      saveState();
-      updateGoogleDriveUI();
+    state.gdrive.lastSyncTime = new Date().toISOString();
+    // Save to local storage without triggering recursive auto-sync
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
+    updateMasterGreeting();
+    renderActiveView();
+    updateGoogleDriveUI();
 
-      if (isManual) {
-        showToast('Google Drive backup saved successfully! ☁️', 'success');
-      }
-    } else if (uploadRes.status === 401) {
-      // Token expired, clear token and prompt reconnect
-      state.gdrive.accessToken = '';
-      state.gdrive.tokenExpiry = 0;
-      saveState();
-      updateGoogleDriveUI();
-      if (isManual) {
-        showToast('Google session expired. Reconnecting...', 'warning');
-        connectGoogleDrive(true);
-      }
-    } else {
-      const errText = await uploadRes.text();
-      console.error('Google Drive Upload Failed', errText);
-      if (isManual) showToast('Cloud upload failed. Please try again.', 'danger');
+    if (isManual && !silent) {
+      showToast('All devices in sync! Cloud & local merged ☁️', 'success');
     }
   } catch (err) {
-    console.error('Google Drive sync error:', err);
-    if (isManual) showToast('Google Drive connection error', 'danger');
+    console.error('Google Drive Sync error:', err);
+    if (isManual && !silent) showToast('Google Drive sync error: ' + err.message, 'danger');
+  } finally {
+    isSyncInProgress = false;
+    if (syncIcon) syncIcon.classList.remove('sync-spinning');
   }
 }
 
-// Restore Database from Google Drive
-async function restoreFromGoogleDrive() {
+function handleGoogleSessionExpired(isManual) {
+  state.gdrive.accessToken = '';
+  state.gdrive.tokenExpiry = 0;
+  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
+  updateGoogleDriveUI();
+  if (isManual) {
+    showToast('Google session expired. Reconnecting...', 'warning');
+    connectGoogleDrive(true);
+  }
+}
+
+// Force Upload Local State to Google Drive
+async function forceUploadToGoogleDrive() {
+  const confirmForce = confirm(
+    'Are you sure you want to force push your local database to Google Drive?\n\nThis will make your current device the master copy and overwrite the cloud file.'
+  );
+  if (!confirmForce) return;
+  await syncWithGoogleDrive({ isManual: true, forceUpload: true });
+}
+
+// Fetch list of Google Drive file revisions for data recovery
+async function fetchGoogleDriveRevisions() {
   if (!isGoogleDriveConnected()) {
-    connectGoogleDrive(false);
-    return;
+    return [];
   }
 
   const token = state.gdrive.accessToken;
-  showToast('Checking Google Drive for backups...', 'info');
+  let fileId = state.gdrive.fileId;
+
+  if (!fileId) {
+    try {
+      const searchRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=name='${GDRIVE_BACKUP_FILENAME}' and trashed=false&fields=files(id,name)&spaces=drive`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (searchRes.ok) {
+        const searchData = await searchRes.json();
+        if (searchData.files && searchData.files.length > 0) {
+          fileId = searchData.files[0].id;
+          state.gdrive.fileId = fileId;
+        }
+      }
+    } catch (e) {
+      console.warn('Error locating file ID for revisions', e);
+    }
+  }
+
+  if (!fileId) return [];
 
   try {
-    const searchRes = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=name='${GDRIVE_BACKUP_FILENAME}' and trashed=false&fields=files(id,name,modifiedTime)&spaces=drive`,
+    const revRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}/revisions?fields=revisions(id,modifiedTime,size)&pageSize=30`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (revRes.ok) {
+      const revData = await revRes.json();
+      return (revData.revisions || []).reverse(); // newest first
+    }
+  } catch (e) {
+    console.error('Failed to fetch Google Drive revisions', e);
+  }
+  return [];
+}
+
+// Open Cloud Backup History Modal
+async function openCloudHistoryModal() {
+  openModal('gdrive-history-modal');
+  const container = document.getElementById('gdrive-revisions-list');
+  if (!container) return;
+
+  container.innerHTML = `
+    <div style="text-align:center; padding:24px; color:var(--text-muted); font-size:0.85rem;">
+      <svg class="sync-spinning" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-bottom:8px; display:inline-block;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+      <div>Loading cloud revision snapshots from Google Drive...</div>
+    </div>
+  `;
+
+  const revisions = await fetchGoogleDriveRevisions();
+
+  if (revisions.length === 0) {
+    container.innerHTML = `
+      <div style="text-align:center; padding:20px; color:var(--text-secondary); font-size:0.85rem;">
+        No previous cloud backup revisions found on Google Drive. Cloud backup is current.
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = '';
+  revisions.forEach((rev, idx) => {
+    const d = new Date(rev.modifiedTime);
+    const dateFormatted = d.toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+    const sizeKb = rev.size ? (parseInt(rev.size) / 1024).toFixed(1) + ' KB' : '';
+
+    const item = document.createElement('div');
+    item.className = 'gdrive-revision-item';
+    item.innerHTML = `
+      <div class="gdrive-revision-info">
+        <div class="gdrive-revision-date">
+          ${dateFormatted} ${idx === 0 ? '<span class="badge badge-success" style="font-size:0.6rem; padding:1px 6px; margin-left:6px;">Latest Cloud</span>' : ''}
+        </div>
+        <div class="gdrive-revision-meta">
+          Google Drive Snapshot ${sizeKb ? '• ' + sizeKb : ''}
+        </div>
+      </div>
+      <button class="btn btn-secondary btn-xs btn-restore-revision" data-revid="${rev.id}" style="padding:4px 10px; font-size:0.72rem; border-color:rgba(66,133,244,0.4); color:var(--brand-white); flex-shrink:0;">
+        Merge into Database
+      </button>
+    `;
+
+    const btn = item.querySelector('.btn-restore-revision');
+    btn.addEventListener('click', () => restoreGoogleDriveRevision(rev.id));
+    container.appendChild(item);
+  });
+}
+
+// Restore and Merge Previous Revision from Google Drive
+async function restoreGoogleDriveRevision(revisionId) {
+  if (!isGoogleDriveConnected()) {
+    showToast('Please connect to Google Drive first', 'warning');
+    return;
+  }
+  const token = state.gdrive.accessToken;
+  const fileId = state.gdrive.fileId;
+  if (!fileId) return;
+
+  try {
+    showToast('Downloading cloud backup revision...', 'info');
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}/revisions/${revisionId}?alt=media`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
-    if (!searchRes.ok) {
-      showToast('Could not search Google Drive files', 'danger');
+    if (!res.ok) {
+      showToast('Could not load this revision from Google Drive', 'danger');
       return;
     }
 
-    const searchData = await searchRes.json();
-    if (!searchData.files || searchData.files.length === 0) {
-      showToast('No NDS backup file found on your Google Drive', 'warning');
+    const revisionData = await res.json();
+    if (!revisionData || (!Array.isArray(revisionData.students) && !Array.isArray(revisionData.payments))) {
+      showToast('Invalid backup file format in this revision', 'danger');
       return;
     }
 
-    const file = searchData.files[0];
-    const fileRes = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
-      { headers: { Authorization: `Bearer ${token}` } }
+    const stuCount = (revisionData.students || []).length;
+    const payCount = (revisionData.payments || []).length;
+    const attCount = (revisionData.attendance || []).length;
+
+    const confirmRestore = confirm(
+      `Found ${stuCount} students, ${payCount} payments, and ${attCount} attendance records in this cloud backup revision.\n\nMerging will restore any missing records safely into your database without deleting current records. Proceed?`
     );
-
-    if (!fileRes.ok) {
-      showToast('Failed to download backup from Google Drive', 'danger');
-      return;
-    }
-
-    const backupData = await fileRes.json();
-    if (!backupData || !Array.isArray(backupData.students)) {
-      showToast('Invalid backup file format on Google Drive', 'danger');
-      return;
-    }
-
-    const modTime = file.modifiedTime ? new Date(file.modifiedTime).toLocaleString('en-IN') : 'Recent';
-    const confirmRestore = confirm(`Found cloud backup from ${modTime} with ${backupData.students.length} students. Restoring will merge/update your local database. Proceed?`);
 
     if (confirmRestore) {
-      // Preserve current gdrive configuration
-      const currentGdrive = { ...state.gdrive };
-
-      state = {
-        masterName: backupData.masterName || state.masterName,
-        students: backupData.students || [],
-        payments: backupData.payments || [],
-        attendance: backupData.attendance || [],
-        holidays: backupData.holidays || [],
-        autoSunday: backupData.autoSunday || false,
-        sundayBatches: backupData.sundayBatches || state.sundayBatches || ["Bharathanatyam batch"],
-        batchPricing: backupData.batchPricing || state.batchPricing,
-        gdrive: currentGdrive
-      };
-
+      state = mergeDatabaseStates(state, revisionData);
       state.gdrive.lastSyncTime = new Date().toISOString();
-      state.gdrive.fileId = file.id;
-
-      saveState();
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
       updateMasterGreeting();
       renderActiveView();
       updateGoogleDriveUI();
+      closeModal('gdrive-history-modal');
+      showToast(`Merged ${stuCount} students & ${payCount} payments from cloud revision!`, 'success');
 
-      showToast('Database successfully restored from Google Drive! ☁️', 'success');
+      // Sync merged state back to Google Drive
+      setTimeout(() => {
+        syncWithGoogleDrive({ isManual: false, silent: true });
+      }, 500);
     }
   } catch (err) {
-    console.error('Google Drive Restore Error:', err);
-    showToast('Failed to restore from Google Drive: ' + err.message, 'danger');
+    console.error('Error restoring Google Drive revision:', err);
+    showToast('Failed to restore revision: ' + err.message, 'danger');
   }
 }
 
@@ -2962,8 +3484,8 @@ function triggerAutoSyncGoogleDrive() {
 
   if (autoSyncTimeout) clearTimeout(autoSyncTimeout);
   autoSyncTimeout = setTimeout(() => {
-    uploadToGoogleDrive(false);
-  }, 2500); // 2.5s debounce
+    syncWithGoogleDrive({ silent: true });
+  }, 3000); // 3s debounce
 }
 
 // ==================== INVOICE & RECEIPT GENERATOR ====================
