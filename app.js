@@ -1061,10 +1061,16 @@ function renderStudents() {
       <div class="student-card-right" style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
         <span class="student-fee-val">₹${parseInt(student.monthlyFee || 0).toLocaleString('en-IN')}</span>
         ${feeSignHtml}
-        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openStudentLatestInvoice('${student.id}')" title="Download Student Invoice PDF" style="padding: 2px 8px; font-size: 0.68rem; border-color: rgba(227,28,37,0.35); display: flex; align-items: center; gap: 4px; color: var(--brand-white); margin-top: 2px;">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-          PDF
-        </button>
+        <div style="display: flex; gap: 4px; align-items: center; margin-top: 2px;">
+          <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); sendStudentFeeWhatsApp('${student.id}')" title="Send WhatsApp Fee Notice" style="padding: 2px 7px; font-size: 0.68rem; border-color: rgba(37,211,102,0.45); display: flex; align-items: center; gap: 3px; color: #25D366;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="#25D366"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981z"/></svg>
+            WA
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openStudentLatestInvoice('${student.id}')" title="Download Student Invoice PDF" style="padding: 2px 7px; font-size: 0.68rem; border-color: rgba(227,28,37,0.35); display: flex; align-items: center; gap: 3px; color: var(--brand-white);">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            PDF
+          </button>
+        </div>
       </div>
     `;
     gridContainer.appendChild(card);
@@ -1096,6 +1102,99 @@ function syncBatchFilters() {
     batchFilter.appendChild(opt);
   });
 }
+
+// ==================== WHATSAPP PARENT NOTIFICATIONS ====================
+function sendStudentFeeWhatsApp(studentId) {
+  const student = state.students.find(s => s.id === studentId);
+  if (!student) {
+    if (typeof showToast === 'function') showToast('Student record not found.', 'danger');
+    return;
+  }
+
+  let cleanPhone = (student.phone || '').replace(/[^0-9]/g, '');
+  if (!cleanPhone) {
+    if (typeof showToast === 'function') showToast(`No contact number registered for ${student.name}.`, 'warning');
+    return;
+  }
+  if (cleanPhone.length === 10) {
+    cleanPhone = '91' + cleanPhone;
+  } else if (cleanPhone.length === 11 && cleanPhone.startsWith('0')) {
+    cleanPhone = '91' + cleanPhone.slice(1);
+  }
+
+  const memStatus = getStudentMembershipStatus(student);
+  const batch = student.batch || 'Kids batch (batch 1)';
+  const pricing = (state.batchPricing && state.batchPricing[batch]) || { '1m': student.monthlyFee || 1500, '3m': 4000, '6m': 7500, '12m': 14000 };
+  const monthlyFeeVal = parseInt(student.monthlyFee || pricing['1m'] || 1500).toLocaleString('en-IN');
+  const p3m = parseInt(pricing['3m'] || 4000).toLocaleString('en-IN');
+  const p6m = parseInt(pricing['6m'] || 7500).toLocaleString('en-IN');
+  const p12m = parseInt(pricing['12m'] || 14000).toLocaleString('en-IN');
+  const packageList = `• 1 Month: ₹${monthlyFeeVal}\n• 3 Months: ₹${p3m}\n• 6 Months: ₹${p6m}\n• 12 Months: ₹${p12m}`;
+
+  let msg = '';
+  if (student.status !== 'active') {
+    msg = `Hi Sir/Madam, greetings from Niki Dance Studio (NDS). 🙏\n\nThis is regarding *${student.name}*'s dance classes (${batch}). The membership is currently marked as paused. If you would like to resume classes or have any queries regarding schedules and fees, please let us know!\n\nThank you!\n- Niki Dance Studio`;
+  } else if (memStatus.status === 'paid') {
+    const validTill = new Date(memStatus.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    msg = `Hi Sir/Madam, greetings from Niki Dance Studio (NDS). 🙏\n\nThis is a fee update regarding *${student.name}* (${batch}):\n\n*Fee Status:* ✅ PAID & ACTIVE\n*Valid Until:* ${validTill} (${memStatus.daysLeft} days remaining)\n\nThank you for your prompt fee payment! See you in class! 💃🕺\n- Niki Dance Studio`;
+  } else if (memStatus.status === 'unpaid') {
+    const admDate = student.admissionDate ? new Date(student.admissionDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Admission';
+    msg = `Hi Sir/Madam, this is a friendly reminder from Niki Dance Studio (NDS) regarding *${student.name}*'s dance class fees (${batch}). 🙏\n\n*Fee Status:* ⚠️ PENDING (Admission / First Month)\n*Admitted on:* ${admDate}\n*Monthly Fee:* ₹${monthlyFeeVal}\n\n*Fee Packages (${batch}):*\n${packageList}\n\nKindly clear the pending fees at your earliest convenience.\n\nThank you!\n- Niki Dance Studio`;
+  } else {
+    // expired
+    const dueFormatted = new Date(memStatus.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    const overdueText = memStatus.daysOverdue > 0 ? ` (${memStatus.daysOverdue} days overdue)` : '';
+    msg = `Hi Sir/Madam, this is a friendly reminder from Niki Dance Studio (NDS) regarding *${student.name}*'s dance class fees (${batch}). 🙏\n\n*Fee Status:* ⚠️ PENDING / EXPIRED\n*Validity Ended on:* ${dueFormatted}${overdueText}\n*Monthly Fee:* ₹${monthlyFeeVal}\n\n*Fee Packages (${batch}):*\n${packageList}\n\nKindly clear the pending fees at your earliest convenience. If already paid, please ignore this reminder.\n\nThank you!\n- Niki Dance Studio`;
+  }
+
+  const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`;
+  window.open(waUrl, '_blank');
+}
+
+function sendStudentAbsenceWhatsApp(studentId) {
+  const student = state.students.find(s => s.id === studentId);
+  if (!student) {
+    if (typeof showToast === 'function') showToast('Student record not found.', 'danger');
+    return;
+  }
+
+  let cleanPhone = (student.phone || '').replace(/[^0-9]/g, '');
+  if (!cleanPhone) {
+    if (typeof showToast === 'function') showToast(`No contact number registered for ${student.name}.`, 'warning');
+    return;
+  }
+  if (cleanPhone.length === 10) {
+    cleanPhone = '91' + cleanPhone;
+  } else if (cleanPhone.length === 11 && cleanPhone.startsWith('0')) {
+    cleanPhone = '91' + cleanPhone.slice(1);
+  }
+
+  const batch = student.batch || 'Kids batch (batch 1)';
+  const streak = getConsecutiveAbsences(student.id);
+
+  // Check last attendance records
+  const studentAtt = (state.attendance || [])
+    .filter(a => a.studentId === student.id && a.status)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  
+  const lastAbsent = studentAtt.find(a => a.status === 'absent');
+  const lastAbsentDateStr = lastAbsent ? new Date(lastAbsent.date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) : '';
+
+  let msg = '';
+  if (streak >= 1) {
+    const streakNotice = streak === 1 ? 'the recent class' : `*${streak} consecutive classes*`;
+    const lastMissedNotice = lastAbsentDateStr ? ` (last missed on ${lastAbsentDateStr})` : '';
+    msg = `Hi Sir/Madam, this is a friendly message from Niki Dance Studio (NDS). 🙏\n\nWe noticed that *${student.name}* (${batch}) missed ${streakNotice}${lastMissedNotice}. We miss them in class!\n\nPlease let us know if everything is okay and when they will be joining back. Consistent attendance helps our dancers keep up with choreography! 💃🕺\n\nThank you!\n- Niki Dance Studio`;
+  } else {
+    msg = `Hi Sir/Madam, greetings from Niki Dance Studio (NDS). 🙏\n\nThis is a quick attendance note regarding *${student.name}* (${batch}).\n\nPlease ensure regular attendance for all scheduled dance classes. If *${student.name}* will be missing any upcoming sessions or has missed recent ones due to exams, travel, or health, kindly keep us informed.\n\nThank you for your continuous support!\n- Niki Dance Studio`;
+  }
+
+  const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`;
+  window.open(waUrl, '_blank');
+}
+
+window.sendStudentFeeWhatsApp = sendStudentFeeWhatsApp;
+window.sendStudentAbsenceWhatsApp = sendStudentAbsenceWhatsApp;
 
 // Student detail drawer panel popup
 function showStudentDetails(studentId) {
@@ -1154,6 +1253,44 @@ function showStudentDetails(studentId) {
   }
   
   document.getElementById('detail-monthly-fee-badge').textContent = `₹${parseInt(student.monthlyFee || 0).toLocaleString('en-IN')} / month`;
+
+  // Update WhatsApp Parent Notification Actions in Detail Drawer
+  const waPhoneBadge = document.getElementById('detail-wa-phone-badge');
+  const btnWaFee = document.getElementById('btn-wa-fee-notify');
+  const btnWaAbsent = document.getElementById('btn-wa-absent-notify');
+  const waStatusHint = document.getElementById('detail-wa-status-hint');
+  const consecutiveAbsences = getConsecutiveAbsences(student.id);
+
+  if (waPhoneBadge) {
+    waPhoneBadge.textContent = student.phone ? `📱 ${student.phone}` : 'No Phone';
+  }
+
+  if (btnWaFee) {
+    btnWaFee.onclick = () => sendStudentFeeWhatsApp(student.id);
+  }
+
+  if (btnWaAbsent) {
+    btnWaAbsent.onclick = () => sendStudentAbsenceWhatsApp(student.id);
+  }
+
+  if (waStatusHint) {
+    let feeHintText = '';
+    if (student.status !== 'active') {
+      feeHintText = '<span style="color:var(--warning-gold);">⚠️ Classes Paused</span>';
+    } else if (memStatus.status === 'paid') {
+      const expDate = new Date(memStatus.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+      feeHintText = `<span style="color:#25D366; font-weight:600;">✓ Fee Paid (till ${expDate})</span>`;
+    } else {
+      const overdueText = memStatus.daysOverdue > 0 ? `${memStatus.daysOverdue}d overdue` : 'Fee Due';
+      feeHintText = `<span style="color:var(--brand-red); font-weight:600;">⚠️ ${overdueText} (₹${parseInt(student.monthlyFee || 0).toLocaleString('en-IN')})</span>`;
+    }
+
+    const absentHintText = consecutiveAbsences > 0
+      ? `<span style="color:var(--brand-red); font-weight:600;">⚠️ ${consecutiveAbsences} missed class${consecutiveAbsences > 1 ? 'es' : ''} in a row</span>`
+      : '<span style="color:var(--text-muted);">Attendance regular</span>';
+
+    waStatusHint.innerHTML = `${feeHintText} • ${absentHintText}`;
+  }
   
   // Load Pending Dues for this specific student
   const duesWrapper = document.getElementById('detail-dues-wrapper');
